@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# prime-signer - drive a Passport Prime HSM signer from the host.
+#
+# This is the `ckcc` replacement for Nunchuk's agent-skills. Same shape:
+#   ckcc xpub  -> prime-signer xpub
+#   ckcc sign  -> prime-signer sign --psbt <base64>
+# so the nunchuk-coldcard-hsm flow works unmodified with `ckcc` swapped out.
+#
+# Transport (v1): the file bridge used by the KeyOS hosted simulator,
+#   ${PRIME_BRIDGE:-~/.passport-nunchuk-signer-keyos}
+# Prime runs in HSM mode and auto-signs in-policy PSBTs unattended (no tap);
+# over-policy / recovery spends are left for an on-device approval.
+#
+# Hardware transport (later): HWI over USB - same subcommands, see docs/HWI.md.
+set -euo pipefail
+
+BRIDGE="${PRIME_BRIDGE:-$HOME/.passport-nunchuk-signer-keyos}"
+UNSIGNED="$BRIDGE/unsigned.psbt"
+SIGNED_B64="$BRIDGE/signed-psbt.b64.txt"
+KEYFILE="$BRIDGE/passport-key.txt"
+WAIT_SECS="${PRIME_WAIT_SECS:-30}"
+
+die() { echo "prime-signer: $*" >&2; exit 1; }
+
+cmd_status() {
+  if [ -d "$BRIDGE" ]; then echo "reachable: $BRIDGE"; else die "Prime bridge not found at $BRIDGE (is the app running?)"; fi
+}
+
+# Print Prime's [fp/48'/1'/0'/2']xpub. The user taps "Export Xpub" on device once;
+# Prime writes it to the bridge. (Hardware: this becomes an HWI getxpub call.)
+cmd_xpub() {
+  local path=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --path) path="$2"; shift 2;;
+      --path=*) path="${1#--path=}"; shift;;
+      *) shift;;
+    esac
+  done
+  if [ -z "$path" ]; then
+    # Default account key (written by "Export Xpub" on the device).
+    [ -f "$KEYFILE" ] || die "no exported key yet - tap 'Export Xpub' on Prime first"
+    cat "$KEYFILE"; return 0
+  fi
+  # Arbitrary BIP32 path (HWI get_pubkey_at_path): request -> response over the bridge.
+  rm -f "$BRIDGE/xpub-response.txt"
+  printf '%s' "$path" > "$BRIDGE/xpub-request.txt"
+  local waited=0
+  while [ "$waited" -lt 10 ]; do
+    if [ -f "$BRIDGE/xpub-response.txt" ]; then cat "$BRIDGE/xpub-response.txt"; return 0; fi
+    sleep 1; waited=$((waited + 1))
+  done
+  die "no xpub response from Prime for path $path"
+}
+
+# Submit a base64 PSBT to Prime and return the signed base64.
+# In policy -> signed unattended; over policy -> times out with a clear message.
+cmd_sign() {
+  local psbt=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --psbt) psbt="$2"; shift 2;;
+      --psbt=*) psbt="${1#--psbt=}"; shift;;
+      *) die "unknown arg: $1";;
+    esac
+  done
+  [ -n "$psbt" ] || die "usage: prime-signer sign --psbt <base64>"
+  [ -d "$BRIDGE" ] || die "Prime bridge not found at $BRIDGE"
+
+  # Clear any prior result, then hand Prime the request (app accepts base64 or binary).
+  rm -f "$SIGNED_B64"
+  printf '%s' "$psbt" > "$UNSIGNED"
+
+  # Wait for Prime's HSM poller to consume the request and emit the signature.
+  local waited=0
+  while [ "$waited" -lt "$WAIT_SECS" ]; do
+    if [ -f "$SIGNED_B64" ] && [ ! -f "$UNSIGNED" ]; then
+      cat "$SIGNED_B64"
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  # Still pending: Prime did not auto-sign -> over policy (or recovery). The spend
+  # needs a human approval on the device (on-screen tap, or remote TOTP if headless).
+  if [ -f "$UNSIGNED" ]; then
+    die "over policy: Prime is holding this spend for on-device approval (tap 'Sign PSBT' on Prime, or authorize remotely)"
+  fi
+  die "timed out after ${WAIT_SECS}s with no signature"
+}
+
+case "${1:-}" in
+  status) shift; cmd_status "$@";;
+  xpub)   shift; cmd_xpub "$@";;
+  sign)   shift; cmd_sign "$@";;
+  *) cat >&2 <<EOF
+prime-signer - Passport Prime HSM signer (ckcc replacement)
+
+  prime-signer status                 check the device is reachable
+  prime-signer xpub [--path <p>]      print [fp/path]xpub (default account; any path via bridge)
+  prime-signer sign --psbt <base64>   sign in-policy unattended; else hold for approval
+
+Env: PRIME_BRIDGE (default ~/.passport-nunchuk-signer-keyos), PRIME_WAIT_SECS (30)
+EOF
+     exit 1;;
+esac

@@ -1,0 +1,187 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+export struct PolicyRow {
+    id: string,
+    name: string,
+    checksum: string,
+    network: string,
+    summary: string,
+}
+
+export struct PathRow {
+    kind-label: string,   // "Primary path" / "Recovery path"
+    is-recovery: bool,
+    headline: string,     // plain gist, e.g. "Spend anytime" / "After ~12 months untouched"
+    detail: string,       // who can sign + the condition, in plain language
+}
+
+export struct SignerRow {
+    fingerprint: string,
+    owned: bool,
+    detail: string,
+}
+
+export struct OutputRow {
+    address: string,
+    amount: string,    // "10,000 sats"
+    is-change: bool,   // true = returns to this wallet, false = leaving
+}
+export struct ActivityRow {
+    amount: string,
+    dest: string,
+    txid: string,
+    kind: string,   // "Auto-signed" | "Approved"
+    wallet: string, // which wallet this spend was for (shown when several are enrolled)
+}
+
+export global Callbacks {
+    // -- Home: registered policies -----------------------------------------
+    in-out property <[PolicyRow]> policies: [];        // active (non-archived)
+    in-out property <int> policy-count: 0;
+    in-out property <[PolicyRow]> archived-policies: [];
+    in-out property <int> archived-count: 0;
+
+    // -- Policy detail ------------------------------------------------------
+    in-out property <string> detail-id: "";
+    in-out property <string> detail-name: "";
+    in-out property <string> detail-checksum: "";
+    in-out property <string> detail-network: "";
+    in-out property <string> detail-descriptor: "";
+    in-out property <bool> detail-archived: false;
+    in-out property <[PathRow]> detail-paths: [];
+    in-out property <[SignerRow]> detail-signers: [];
+    in-out property <bool> detail-has-platform-key: false; // 2-of-3: Nunchuk also enforces a policy
+
+    // -- Signing review -----------------------------------------------------
+    in-out property <bool> psbt-loading: false;        // reading + matching a PSBT (show spinner)
+    in-out property <bool> review-ready: false;        // a PSBT was loaded (gate navigation; false on cancel)
+    in-out property <string> review-wallet-name: "";   // which registered wallet the PSBT matched
+    in-out property <bool> review-matched: false;
+    in-out property <bool> review-can-sign: false;
+    in-out property <bool> review-is-recovery: false;
+    in-out property <string> review-path-label: "";
+    in-out property <[OutputRow]> review-output-rows: [];
+    in-out property <string> review-total-out: "";  // sum actually leaving the wallet
+    in-out property <string> review-fee: "";
+    in-out property <string> review-warning: "";
+    in-out property <string> review-status: "";
+    in-out property <bool> review-gate-auto: false;    // gate verdict: within policy -> auto-signed
+    in-out property <string> review-gate-reason: "";   // why a tap is required (cap exceeded)
+    in-out property <int> recovery-blocks: 20;          // recovery branch timelock (blocks)
+    in-out property <int> setup-recovery-blocks: 4320;  // ~30 days default; chosen on the explainer
+    in-out property <string> setup-recovery-summary: ""; // human-readable, e.g. "20 blocks (~3 hours)"
+    // Guided wallet setup (BOTH models). 0 = not in setup; 1 = wait for the agent to
+    // build the wallet, 2 = import the wallet descriptor. Global so it survives
+    // navigating out to the export / import pages and back.
+    in-out property <int> platform-setup-step: 0;
+    in-out property <bool> setup-with-platform: false;  // current setup's model: true = 2-of-3, false = 2-of-2
+    in-out property <bool> adding-wallet: false;        // adding another wallet from the populated home
+    in-out property <int> per-tx-limit: 100000;         // auto-sign ceiling (sats)
+    in-out property <int> daily-cap: 500000;            // rolling 24h cap (sats; 0 = off)
+    // Comma-formatted strings for display (Slint int interpolation has no commas).
+    // Set in refresh_home() and the set-per-tx-limit / set-daily-cap handlers.
+    in-out property <string> per-tx-limit-display: "100,000";
+    in-out property <string> daily-cap-display: "500,000";
+
+    // -- Security state: safe mode, freeze, budget -------------------------
+    // Auto-signing paused because a saved file was corrupt or a debit failed to
+    // persist (fail-closed). Shows a banner on Home; "Reset budget" clears it.
+    in-out property <bool> safe-mode: false;
+    in-out property <string> safe-mode-reason: "";
+    // User "freeze" kill-switch (persisted in the policy): forces every spend to a tap.
+    in-out property <bool> frozen: false;
+    // Remaining auto-sign budget before the next approval is required, against the
+    // most-binding active cap. Computed in refresh_home().
+    in-out property <bool> budget-active: false;         // any device-enforced cap to show
+    in-out property <string> budget-remaining-display: ""; // sats left before approval
+    in-out property <string> budget-binding-label: "";   // which cap binds ("session cap" etc.)
+    in-out property <string> budget-spent-display: "";    // spent against the binding cap
+    in-out property <string> budget-cap-display: "";      // the binding cap value
+    // Whether rolling time-window (daily/weekly) caps are actually enforceable
+    // (true on sim / with an RTC; false on device, where they're paused).
+    in-out property <bool> time-caps-active: false;
+    // Destination allowlist (addresses). When non-empty, only these addresses
+    // auto-sign; anything else needs a tap.
+    in-out property <[string]> allowlist-rows: [];
+
+    in-out property <[ActivityRow]> activity-rows: [];
+    in-out property <bool> activity-multi-wallet: false;  // >1 wallet enrolled -> show wallet per row
+    in-out property <bool> hsm-enabled: false;          // HSM mode: poll bridge + auto-sign
+    in-out property <bool> signing: false;              // sign in progress (spinner)
+    in-out property <bool> review-signed: false;        // signing succeeded
+    in-out property <bool> review-saved: false;         // signed PSBT written to a file
+    in-out property <string> review-signed-detail: "";  // where it was saved / next step
+
+    // -- Xpub export --------------------------------------------------------
+    in-out property <string> xpub-fingerprint: "";
+    in-out property <string> xpub-path: "";
+    in-out property <string> xpub-value: "";
+    in-out property <string> xpub-network: "testnet";
+
+    // -- Shared export result (xpub key + descriptor) -----------------------
+    in-out property <bool> export-ok: false;        // last export succeeded -> show success screen
+    in-out property <string> export-error: "";      // why the last export failed (shown in place)
+    in-out property <string> export-done-title: ""; // success screen heading
+    in-out property <string> export-done-detail: ""; // success screen body
+
+    // -- Verify address -----------------------------------------------------
+    in-out property <bool> verify-ready: false;        // a code was scanned (gate navigation; false on cancel)
+    in-out property <bool> verify-matched: false;
+    in-out property <string> verify-title: "";
+    in-out property <string> verify-addr: "";
+    in-out property <string> verify-detail: "";
+
+    // -- Status banner ------------------------------------------------------
+    in-out property <string> status: "";
+
+    // -- Import flow --------------------------------------------------------
+    // Set true by import-policy() when a descriptor parsed OK and is staged for
+    // review (detail-* hold the parsed policy, not yet committed to the store).
+    in-out property <bool> import-parsed: false;
+    in-out property <bool> import-committed: false;
+    // Set when an import fails so the home screen can show why (instead of
+    // silently bouncing back with no feedback).
+    in-out property <string> import-error: "";
+    // User-chosen wallet name (edited on the review screen; applied on confirm).
+    in-out property <string> import-name: "";
+    // Editable name for the selected policy (rename screen); tracks detail-name.
+    in-out property <string> rename-value: "";
+
+    // -- UI -> Rust ---------------------------------------------------------
+    callback import-policy();      // parse a descriptor + stage it for review
+    callback confirm-import();     // commit the staged policy
+    callback cancel-import();      // discard the staged policy
+    callback select-policy(string /* checksum id */);
+    callback sign-psbt(string /* checksum id */);
+    callback verify-address(string /* checksum id */);
+    callback archive-policy(string /* checksum id */);
+    callback restore-policy(string /* checksum id */);
+    callback delete-policy(string /* checksum id */);
+    callback rename-policy(string /* checksum id */, string /* new name */);
+    callback export-descriptor(string /* checksum id */);
+    callback export-xpub();
+    callback show-activity();          // load recent signing activity
+    callback set-per-tx-limit(int);    // edit per-tx auto-sign limit (sats)
+    callback set-daily-cap(int);       // edit rolling daily cap (sats; 0 = off)
+    callback set-custom-limit(string /* "pertx" | "daily" */, string /* sats, comma-tolerant */);
+    callback set-frozen(bool);         // toggle the freeze auto-signing kill-switch
+    callback reset-budget();           // reset the session budget + clear a corruption pause
+    callback add-allowlist-address();         // scan a QR -> add a destination to the allowlist
+    callback remove-allowlist-address(string); // remove a destination from the allowlist
+    callback setup-self-custody();        // onboarding: enter the guided 2-of-2 flow (agent + Passport)
+    callback begin-platform-setup();      // onboarding: enter the guided 2-of-3 flow (+ Nunchuk Platform Key)
+    callback set-setup-recovery-blocks(int); // clamp + update the recovery timelock summary
+    callback hsm-poll();                  // HSM tick: auto-sign in-policy bridge PSBTs
+    // USB-thread -> UI bridge. poll-usb-events() drains background signals on the main
+    // thread (refresh after a USB sign; stage a pushed descriptor for review). When it
+    // sets usb-review-pending, the app navigates to the import-review approval screen.
+    callback poll-usb-events();
+    in-out property <bool> usb-review-pending: false;   // navigate to descriptor-review
+    in-out property <bool> usb-sign-pending: false;      // navigate to PSBT sign-review
+    in-out property <int> pending-approvals: 0;          // over-policy spends waiting for a tap
+    callback set-xpub-network(string /* bitcoin | testnet */);
+    callback export-key-file(); // save the signer key to a chosen location
+    callback approve();
+    callback reject-pending-sign();  // drop the on-screen pending PSBT (queue advances)
+}

@@ -1,0 +1,217 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { AppHeader, TextLg, TextMd, TextSm, BasePage, ScrollBody, IconButton, Icon } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks, PathRow, SignerRow } from "../../callbacks.slint";
+import { PolicyPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard, NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component PolicyPagePage inherits Rectangle {
+    in property <PolicyPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.PolicyTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                // Tucked-away access to advanced/destructive actions.
+                IconButton {
+                    icon: "ellipsis";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.advanced-page({ }); }
+                }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+
+                    // Wallet identity
+                    TextLg { text: Callbacks.detail-name; color: Palette.content-primary; bold: true; wrap: word-wrap; }
+                    HorizontalLayout {
+                        spacing: Size.sz2;
+                        TextSm { text: Callbacks.detail-network; color: Nunchuk.green; }
+                        TextSm { text: Callbacks.detail-checksum; color: Palette.content-tertiary; }
+                    }
+
+                    // Spend paths — icon-led, matching the import review.
+                    TextSm { text: TR2.lookup(TrId.PolicySpendIntro); color: Palette.content-tertiary; }
+                    for p in Callbacks.detail-paths: NunchukCard {
+                        width: 448px;
+                        recovery: p.is-recovery;
+                        HorizontalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz3;
+                            VerticalLayout {
+                                alignment: start;
+                                Icon {
+                                    name: p.is-recovery ? "hourglass" : "check-circle";
+                                    size: 36px;
+                                    color: p.is-recovery ? Nunchuk.recovery : Nunchuk.green;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: Size.sz1;
+                                horizontal-stretch: 1;
+                                TextSm {
+                                    text: p.kind-label;
+                                    color: p.is-recovery ? Nunchuk.recovery : Nunchuk.green;
+                                    bold: true;
+                                }
+                                TextLg { text: p.headline; color: Nunchuk.on-surface; bold: true; wrap: word-wrap; }
+                                TextSm { text: p.detail; color: Nunchuk.on-surface-dim; wrap: word-wrap; }
+                            }
+                        }
+                    }
+
+                    // Keys — key icon, green when this Passport holds it.
+                    TextSm { text: TR2.lookup(TrId.PolicyKeysTitle); color: Palette.content-tertiary; }
+                    for s in Callbacks.detail-signers: HorizontalLayout {
+                        spacing: Size.sz3;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Icon { name: "key"; size: 28px; color: s.owned ? Nunchuk.green : Palette.content-tertiary; }
+                        }
+                        VerticalLayout {
+                            spacing: Size.sz0_5;
+                            horizontal-stretch: 1;
+                            TextMd {
+                                text: s.detail;
+                                color: s.owned ? Nunchuk.green : Palette.content-primary;
+                                bold: true;
+                                wrap: word-wrap;
+                            }
+                            TextSm { text: TR2.format(TrId.ImportPathsKeyFingerprint, [s.fingerprint]); color: Palette.content-tertiary; }
+                        }
+                    }
+
+                    // The recovery timelock is shown on the recovery path card above
+                    // (descriptor-driven), so there's no standalone line here. A wallet
+                    // with no recovery branch simply shows no recovery card.
+
+                    // Spending policy (off-chain rules Passport enforces; editable anytime,
+                    // since they are not part of the on-chain descriptor).
+                    Rectangle { height: Size.sz3; }
+                    TextSm {
+                        text: Callbacks.detail-has-platform-key
+                              ? "Everyday limit"
+                              : "Spending policy (Passport enforces these)";
+                        color: Palette.content-tertiary;
+                    }
+                    // 2-of-3: the everyday limit lives on Nunchuk's Platform Key, and any
+                    // spend that reaches Passport always needs a tap, so Passport's on-device
+                    // auto-sign limits do nothing here. Show a read-only note, not controls.
+                    if Callbacks.detail-has-platform-key: TextMd {
+                        text: "Enforced by Nunchuk's Platform Key, set in Nunchuk. Any spend routed to Passport always needs your approval, so there's no on-device auto-sign limit for this wallet.";
+                        color: Nunchuk.on-surface;
+                        wrap: word-wrap;
+                    }
+                    // 2-of-2: Passport auto-signs within these editable limits.
+                    if !Callbacks.detail-has-platform-key: VerticalLayout {
+                        spacing: Size.sz2;
+                        TextMd { text: "Auto-sign up to \{Callbacks.per-tx-limit-display} sats per transaction"; color: Nunchuk.on-surface; wrap: word-wrap; }
+                        HorizontalLayout {
+                            spacing: Size.sz2;
+                            NunchukButton { label: "50k"; primary: Callbacks.per-tx-limit == 50000; clicked => { Callbacks.set-per-tx-limit(50000); } }
+                            NunchukButton { label: "100k"; primary: Callbacks.per-tx-limit == 100000; clicked => { Callbacks.set-per-tx-limit(100000); } }
+                            NunchukButton { label: "500k"; primary: Callbacks.per-tx-limit == 500000; clicked => { Callbacks.set-per-tx-limit(500000); } }
+                        }
+                        TextMd { text: Callbacks.daily-cap == 0 ? "No daily cap" : "Daily cap: \{Callbacks.daily-cap-display} sats"; color: Nunchuk.on-surface; wrap: word-wrap; }
+                        HorizontalLayout {
+                            spacing: Size.sz2;
+                            NunchukButton { label: "500k"; primary: Callbacks.daily-cap == 500000; clicked => { Callbacks.set-daily-cap(500000); } }
+                            NunchukButton { label: "1M"; primary: Callbacks.daily-cap == 1000000; clicked => { Callbacks.set-daily-cap(1000000); } }
+                            NunchukButton { label: "Off"; primary: Callbacks.daily-cap == 0; clicked => { Callbacks.set-daily-cap(0); } }
+                        }
+                        // Honest about the clock: rolling daily/weekly caps need a
+                        // trusted clock the device doesn't have yet, so they're paused.
+                        if !Callbacks.time-caps-active: TextSm {
+                            text: "Daily/weekly caps need a clock and are paused on this device. The session + lifetime caps still apply.";
+                            color: Palette.content-tertiary;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    // -- Budget, freeze, allowlist (2-of-2 only) ---------------
+                    // On a 2-of-3, Passport never auto-signs (it always-approves; the
+                    // everyday limit lives in Nunchuk's Platform Key), so none of these
+                    // on-device controls apply. The Platform Key note above is the whole
+                    // story there.
+                    if !Callbacks.detail-has-platform-key: VerticalLayout {
+                        spacing: Size.sz3;
+                        if Callbacks.budget-active: VerticalLayout {
+                            spacing: Size.sz1;
+                            TextSm { text: "Auto-sign budget"; color: Palette.content-tertiary; }
+                            TextMd {
+                                text: Callbacks.budget-spent-display + " / " + Callbacks.budget-cap-display + " sats used (" + Callbacks.budget-binding-label + ")";
+                                color: Nunchuk.on-surface;
+                                wrap: word-wrap;
+                            }
+                            TextSm { text: Callbacks.budget-remaining-display + " sats left before approval"; color: Nunchuk.green; }
+                            Rectangle { height: Size.sz2; }
+                            HorizontalLayout {
+                                NunchukButton { label: "Reset budget"; primary: false; clicked => { Callbacks.reset-budget(); } }
+                                Rectangle { }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: Size.sz1;
+                            TextSm { text: "Freeze auto-signing"; color: Palette.content-tertiary; }
+                            TextSm {
+                                text: Callbacks.frozen ? "Frozen: every spend needs your approval." : "Active: spends within your limits auto-sign.";
+                                color: Palette.content-secondary;
+                                wrap: word-wrap;
+                            }
+                            Rectangle { height: Size.sz1; }
+                            HorizontalLayout {
+                                NunchukButton { label: Callbacks.frozen ? "Unfreeze" : "Freeze"; primary: Callbacks.frozen; clicked => { Callbacks.set-frozen(!Callbacks.frozen); } }
+                                Rectangle { }
+                            }
+                        }
+
+                        VerticalLayout {
+                            spacing: Size.sz1;
+                            TextSm { text: "Destination allowlist"; color: Palette.content-tertiary; }
+                            TextSm {
+                                text: Callbacks.allowlist-rows.length == 0
+                                      ? "Empty: the agent can auto-sign to any address (within your limits). Add addresses to require a tap for anywhere else."
+                                      : "Only these addresses auto-sign. Spends to anywhere else need your approval.";
+                                color: Palette.content-secondary;
+                                wrap: word-wrap;
+                            }
+                            for a in Callbacks.allowlist-rows: NunchukCard {
+                                width: 448px;
+                                HorizontalLayout {
+                                    padding: Size.sz3;
+                                    spacing: Size.sz2;
+                                    TextSm { text: a; color: Nunchuk.on-surface; wrap: word-wrap; horizontal-stretch: 1; vertical-alignment: center; }
+                                    NunchukButton { label: "Remove"; primary: false; clicked => { Callbacks.remove-allowlist-address(a); } }
+                                }
+                            }
+                            HorizontalLayout {
+                                NunchukButton { label: "Add address (scan QR)"; primary: false; clicked => { Callbacks.add-allowlist-address(); } }
+                                Rectangle { }
+                            }
+                        }
+                    }
+
+                    Rectangle { height: Size.sz4; }
+                }
+            }
+        }
+    }
+}

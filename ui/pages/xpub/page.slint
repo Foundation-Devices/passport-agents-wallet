@@ -1,0 +1,106 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, TextLg, TextMd, TextSm, BasePage,
+         ScrollBody, IconButton } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { XpubPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard, NunchukButton } from "../../nunchuk-widgets.slint";
+
+// One numbered step in the walkthrough.
+component Step inherits HorizontalLayout {
+    in property <string> number;
+    in property <string> text;
+    spacing: Size.sz3;
+    alignment: start;
+    Text {
+        text: root.number;
+        color: Nunchuk.green;
+        font-size: 18px;
+        font-weight: 700;
+        vertical-alignment: top;
+    }
+    TextMd {
+        text: root.text;
+        color: Palette.content-secondary;
+        wrap: word-wrap;
+        horizontal-stretch: 1;
+    }
+}
+
+export component XpubPagePage inherits Rectangle {
+    in property <XpubPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.XpubTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;  // 16px → 448px content fits 480px screen (no h-scroll)
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    // What's happening.
+                    TextMd {
+                        text: TR2.lookup(TrId.XpubIntro);
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+
+                    TextSm { text: TR2.lookup(TrId.XpubHowItWorks); color: Palette.content-tertiary; }
+                    TextSm { text: TR2.lookup(TrId.XpubNetworkHint); color: Palette.content-tertiary; }
+                    HorizontalLayout {
+                        spacing: Size.sz2;
+                        NunchukButton {
+                            label: "Testnet";
+                            primary: Callbacks.xpub-network == "testnet";
+                            clicked => { Callbacks.set-xpub-network("testnet"); }
+                        }
+                        NunchukButton {
+                            label: TR2.lookup(TrId.XpubNetworkMainnet);
+                            primary: Callbacks.xpub-network == "bitcoin";
+                            clicked => { Callbacks.set-xpub-network("bitcoin"); }
+                        }
+                    }
+                    Step {
+                        number: "1";
+                        text: TR2.lookup(TrId.XpubStep1);
+                    }
+                    Step {
+                        number: "2";
+                        text: TR2.lookup(TrId.XpubStep2);
+                    }
+                    Step {
+                        number: "3";
+                        text: TR2.lookup(TrId.XpubStep3);
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonContinue);
+                    primary: true;
+                    clicked => { Navigate.xpub-save-page({ }); }
+                }
+            }
+        }
+    }
+}

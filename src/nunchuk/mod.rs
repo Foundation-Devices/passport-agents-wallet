@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+//! Nunchuk policy/PSBT/signing logic, on the SDK's bitcoin stack.
+//!
+//! Bitcoin + miniscript come from `ngwallet::bdk_wallet` (the same crates the
+//! Bitcoin app uses), so this compiles for both the host simulator and the
+//! `armv7a-unknown-xous-elf` device target — unlike a crates.io `miniscript`
+//! with std/secp, which doesn't link on device. The logic mirrors the
+//! host-tested `nunchuk-signer-core` reference crate verbatim.
+
+// Ported reference library (mirrors nunchuk-signer-core). Some API items
+// (e.g. sign_and_finalize, store helpers) are exercised by tests rather than
+// the binary's hot path, so allow unused items at the module level.
+#![allow(dead_code)]
+
+pub use ngwallet::bdk_wallet::{bitcoin, miniscript};
+
+pub mod device_protocol;
+pub mod gate;
+pub mod history;
+pub mod descriptor;
+pub mod policy;
+pub mod psbt;
+pub mod signing;
+pub mod store;
+
+use serde::{Deserialize, Serialize};
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Error {
+    /// Descriptor text could not be parsed.
+    Parse(String),
+    /// Parsed, but uses a form this POC does not support (e.g. Taproot).
+    Unsupported(String),
+    /// PSBT does not match any registered policy.
+    NotRegistered,
+    /// Passport does not own a key on the active spend path.
+    NoPassportKey,
+    /// Signing/finalizing failed.
+    Sign(String),
+    /// PSBT/policy matching failed.
+    Match(String),
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::Parse(s) => write!(f, "parse error: {s}"),
+            Error::Unsupported(s) => write!(f, "unsupported policy: {s}"),
+            Error::NotRegistered => write!(f, "PSBT does not match a registered policy"),
+            Error::NoPassportKey => write!(f, "Passport owns no key on the active spend path"),
+            Error::Sign(s) => write!(f, "signing error: {s}"),
+            Error::Match(s) => write!(f, "match error: {s}"),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
+/// A Nunchuk policy the user has registered on Passport.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegisteredPolicy {
+    pub id: String,
+    pub name: String,
+    pub network: String,
+    pub descriptor: String,
+    pub descriptor_checksum: String,
+    pub policy_fingerprint: String,
+    pub signers: Vec<PolicySigner>,
+    pub paths: Vec<SpendPath>,
+    /// Archived policies are hidden from the home list; they can be restored or
+    /// permanently deleted from the archive. Defaults false for older records.
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PolicySigner {
+    pub fingerprint: String,
+    pub derivation_path: String,
+    pub xpub: String,
+    pub owned_by_passport: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SpendPathKind {
+    Primary,
+    Recovery,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpendPath {
+    pub kind: SpendPathKind,
+    pub threshold: usize,
+    pub total_keys: usize,
+    pub relative_timelock_blocks: Option<u32>,
+    pub signer_fingerprints: Vec<String>,
+}
+
+impl SpendPath {
+    /// Approximate the relative timelock in months (~4380 blocks/month).
+    pub fn approx_months(&self) -> Option<u32> { self.relative_timelock_blocks.map(|b| b / 4380) }
+}

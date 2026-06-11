@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# prime-usb - talk to a Passport Prime running the Nunchuk Signer app, over USB-CDC.
+#
+# This is a THIN device-talker. It does NO Bitcoin work: nunchuk-cli generates keys,
+# builds PSBTs, signs, and broadcasts. prime-usb only speaks the device's
+# newline-delimited JSON protocol (see src/nunchuk/device_protocol.rs) to:
+#   - read Prime's key,
+#   - register a wallet descriptor (with an on-device approval), and
+#   - route a PSBT to Prime for an in-policy auto-sign or an over-policy approval.
+#
+# It replaces the simulator-only `prime-signer` (file-bridge) shim for real hardware.
+#
+# Usage:
+#   prime-usb fingerprint
+#   prime-usb xpub [--path m/48'/1'/0'/2']
+#   prime-usb register --descriptor "wsh(...)#cs"     # push + wait for on-device approval
+#   prime-usb sign --psbt <base64|->                  # prints signed PSBT, or exits 10 if held
+#   prime-usb address --index 0 [--change]
+#   prime-usb spec [--field model|recovery_blocks]    # the onboarding setup the user chose
+#
+# Only dependency: pyserial  (pip install pyserial).
+# On PEP-668 ("externally managed") Pythons a plain pip install is blocked, so if
+# pyserial is missing we re-exec into a venv: $PRIME_USB_PYTHON if set, else
+# ~/.passport-nunchuk-signer-keyos/venv (create with:
+#   python3 -m venv ~/.passport-nunchuk-signer-keyos/venv
+#   ~/.passport-nunchuk-signer-keyos/venv/bin/pip install pyserial).
+# Requires the Nunchuk app OPEN on the device so the USB-CDC port is present.
+
+import sys
+import os
+import json
+import time
+import glob
+import argparse
+
+try:
+    import serial  # pyserial
+except ImportError:
+    # Try to re-exec into a venv that has pyserial (once — guard against loops).
+    if not os.environ.get("PRIME_USB_REEXEC"):
+        cand = os.environ.get("PRIME_USB_PYTHON") or os.path.expanduser(
+            "~/.passport-nunchuk-signer-keyos/venv/bin/python"
+        )
+        # Compare unresolved paths: a venv's bin/python symlinks back to the same
+        # base interpreter, so realpath() would wrongly call them identical and skip
+        # the re-exec (the venv still gives a different sys.path / site-packages).
+        if cand and os.path.exists(cand) and os.path.abspath(cand) != os.path.abspath(sys.executable):
+            os.environ["PRIME_USB_REEXEC"] = "1"
+            os.execv(cand, [cand, os.path.abspath(__file__), *sys.argv[1:]])
+    sys.exit("prime-usb needs pyserial:  pip install pyserial  (or create the venv noted at the top of this file)")
+
+BAUD = 115200  # ignored for USB-CDC, but pyserial wants a value
+
+
+_RESOLVED_PORT = None
+
+
+def _looks_like_prime(port, timeout=2):
+    """Open a candidate port and ask for the fingerprint; True if it answers like
+    the Nunchuk app. Lets us pick the right port without grabbing an unrelated
+    serial device (other dev boards also enumerate as /dev/cu.usbmodem*)."""
+    try:
+        s = serial.Serial(port, BAUD, timeout=timeout)
+    except Exception:
+        return False
+    try:
+        time.sleep(0.2)
+        s.reset_input_buffer()
+        s.write(b'{"cmd":"fingerprint"}\n')
+        s.flush()
+        line = s.readline().decode(errors="replace").strip()
+    except Exception:
+        return False
+    finally:
+        s.close()
+    try:
+        return bool(line) and json.loads(line).get("result") == "fingerprint"
+    except json.JSONDecodeError:
+        return False
+
+
+def find_port():
+    global _RESOLVED_PORT
+    if _RESOLVED_PORT:
+        return _RESOLVED_PORT
+    # 1. Explicit override wins (deterministic, e.g. for a recorded demo).
+    env = os.environ.get("PRIME_USB_PORT")
+    if env:
+        _RESOLVED_PORT = env
+        return env
+    # 2. The named CDC port, when macOS labels it (Passport_Prime...).
+    named = sorted(glob.glob("/dev/cu.usbmodemPassport_Prime*"))
+    if named:
+        _RESOLVED_PORT = named[0]
+        return named[0]
+    # 3. Otherwise some firmware enumerates a generic usbmodem/ttyACM name. Probe
+    #    each with a fingerprint request and take the first that answers like a Prime.
+    for port in sorted(glob.glob("/dev/cu.usbmodem*") + glob.glob("/dev/ttyACM*")):
+        if _looks_like_prime(port):
+            _RESOLVED_PORT = port
+            return port
+    sys.exit(
+        "no Passport Prime USB port found.\n"
+        "  - Is the device plugged in over USB-C?\n"
+        "  - Is the Nunchuk app open on the device? (it registers the USB port at runtime)\n"
+        "  - Or pin it explicitly:  PRIME_USB_PORT=/dev/cu.usbmodemXXX prime-usb ..."
+    )
+
+
+def rpc(req, timeout=60):
+    """Send one JSON request, return the parsed JSON response.
+
+    A device sign can take ~35s, so the default read timeout is generous. The input
+    buffer is drained before each request because responses otherwise lag by one.
+    """
+    s = serial.Serial(find_port(), BAUD, timeout=timeout)
+    try:
+        time.sleep(0.2)
+        s.reset_input_buffer()
+        s.write((json.dumps(req) + "\n").encode())
+        s.flush()
+        line = s.readline().decode(errors="replace").strip()
+    finally:
+        s.close()
+    if not line:
+        sys.exit("device timed out (no response). Is a wallet enrolled / the app on the right screen?")
+    try:
+        return json.loads(line)
+    except json.JSONDecodeError:
+        sys.exit("device returned a non-JSON line: %r" % line)
+
+
+def _result_or_die(r, key):
+    if r.get("result") == "error":
+        sys.exit("device error: %s" % r.get("message", r))
+    val = r.get(key)
+    if val is None:
+        sys.exit("unexpected device response: %s" % r)
+    return val
+
+
+def cmd_fingerprint(args):
+    print(_result_or_die(rpc({"cmd": "fingerprint"}), "fingerprint"))
+
+
+def cmd_xpub(args):
+    # Only standard wallet account paths are served (the device allowlists them).
+    print(_result_or_die(rpc({"cmd": "xpub", "path": args.path}), "key"))
+
+
+def cmd_register(args):
+    # The device stages the descriptor and raises an approval screen; the user taps
+    # Confirm. We poll register until it reports Registered (or errors).
+    sys.stderr.write("Pushing descriptor; APPROVE it on the device when the review appears...\n")
+    for _ in range(80):
+        r = rpc({"cmd": "register", "descriptor": args.descriptor})
+        res = r.get("result")
+        if res == "registered":
+            print(json.dumps({"registered": r.get("name"), "checksum": r.get("checksum")}))
+            return
+        if res == "error":
+            sys.exit("register failed: %s" % r.get("message"))
+        sys.stderr.write("  waiting for on-device approval...\n")
+        time.sleep(3)
+    sys.exit("not approved in time")
+
+
+def cmd_sign(args):
+    psbt = sys.stdin.read().strip() if args.psbt == "-" else args.psbt
+    r = rpc({"cmd": "sign", "psbt": psbt}, timeout=90)
+    res = r.get("result")
+    if res == "signed":
+        print(r["psbt"])  # signed PSBT (base64) on stdout -> pipe into `nunchuk tx sign --psbt`
+    elif res == "pending":
+        # Over policy / frozen / not-allowlisted / recovery: Prime is holding it for an
+        # on-device approval. Exit 10 so the agent can branch on "needs a human".
+        sys.stderr.write("PENDING (held for on-device approval): %s\n" % r.get("reason"))
+        sys.exit(10)
+    else:
+        sys.exit("sign failed: %s" % (r.get("message") or r))
+
+
+def cmd_address(args):
+    print(_result_or_die(rpc({"cmd": "showaddr", "index": args.index, "change": args.change}), "address"))
+
+
+def cmd_spec(args):
+    # The onboarding setup the user chose on the device (model + recovery timelock).
+    # Read this at the wait step so the agent builds the matching wallet, instead of
+    # being told the values — the on-device picker is the single source of truth.
+    r = rpc({"cmd": "spec"})
+    if r.get("result") == "error":
+        sys.exit("device error: %s" % r.get("message", r))
+    model = r.get("model", "")
+    blocks = r.get("recovery_blocks", 0)
+    if args.field == "model":
+        print(model)
+    elif args.field == "recovery_blocks":
+        print(blocks)
+    else:
+        print(json.dumps({"model": model, "recovery_blocks": blocks}))
+
+
+def main():
+    p = argparse.ArgumentParser(
+        prog="prime-usb",
+        description="Talk to Passport Prime (Nunchuk Signer) over USB-CDC. Bitcoin work is nunchuk-cli's job.",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("fingerprint", help="print the device master fingerprint")
+    x = sub.add_parser("xpub", help="print [fp/path]xpub for nunchuk add-key")
+    x.add_argument("--path", default="m/48'/1'/0'/2'")
+    rg = sub.add_parser("register", help="push a wallet descriptor (on-device approval)")
+    rg.add_argument("--descriptor", required=True)
+    sg = sub.add_parser("sign", help="route a PSBT to Prime (auto-sign or hold for approval)")
+    sg.add_argument("--psbt", required=True, help="base64 PSBT, or '-' to read stdin")
+    ad = sub.add_parser("address", help="show/return a wallet address")
+    ad.add_argument("--index", type=int, default=0)
+    ad.add_argument("--change", action="store_true")
+    sp = sub.add_parser("spec", help="read the onboarding setup the user chose (model + recovery timelock)")
+    sp.add_argument("--field", choices=["model", "recovery_blocks"], help="print just one field (default: JSON)")
+    args = p.parse_args()
+    {
+        "fingerprint": cmd_fingerprint,
+        "xpub": cmd_xpub,
+        "register": cmd_register,
+        "sign": cmd_sign,
+        "address": cmd_address,
+        "spec": cmd_spec,
+    }[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()

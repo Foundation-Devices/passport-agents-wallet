@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { AppHeader, TextSm, TextMd, BasePage, ScrollBody, IconButton, QrCodeCard } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { DescriptorQrPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+
+export component DescriptorQrPagePage inherits Rectangle {
+    in property <DescriptorQrPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.DescriptorQrTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    TextMd {
+                        text: TR2.lookup(TrId.DescriptorQrBody);
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: center;
+                        QrCodeCard { data: Callbacks.detail-descriptor; }
+                    }
+
+                    TextSm {
+                        text: Callbacks.detail-checksum;
+                        color: Nunchuk.green;
+                        horizontal-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+}

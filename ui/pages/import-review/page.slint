@@ -1,0 +1,87 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, HeadingLg, TextMd, TextSm, BasePage,
+         ScrollBody, IconButton, TitledInput } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { ImportReviewPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component ImportReviewPagePage inherits Rectangle {
+    in property <ImportReviewPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.ImportReviewTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => {
+                        Callbacks.cancel-import();
+                        Navigate.backward();
+                    }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    // Wallet identity.
+                    HeadingLg { text: TR2.lookup(TrId.ImportReviewNewWallet); horizontal-alignment: center; }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Size.sz2;
+                        TextSm { text: Callbacks.detail-network; color: Nunchuk.green; }
+                        TextSm { text: Callbacks.detail-checksum; color: Palette.content-tertiary; }
+                    }
+
+                    // What's happening.
+                    TextMd {
+                        text: TR2.lookup(TrId.ImportReviewBody);
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    // Give the wallet a name (editable; defaults to "Nunchuk wallet").
+                    TitledInput {
+                        title: TR2.lookup(TrId.ImportReviewWalletName);
+                        placeholder: TR2.lookup(TrId.ImportReviewWalletNamePlaceholder);
+                        caps-mode: sentences;
+                        text <=> Callbacks.import-name;
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                // Primary action is the lower button (closest to thumb).
+                NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonCancel);
+                    primary: false;
+                    clicked => {
+                        Callbacks.cancel-import();
+                        Navigate.home-page({ });
+                    }
+                }
+                NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonContinue);
+                    primary: true;
+                    clicked => { Navigate.import-paths-page({ }); }
+                }
+            }
+        }
+    }
+}

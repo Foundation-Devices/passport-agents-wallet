@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Satoshi Supply Co. — pay with a Bitcoin agent</title>
+  <meta name="description" content="A small demo shop that takes on-chain Bitcoin. Built to show an AI agent paying a real testnet4 invoice, gated by a Passport Prime." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%E2%82%BF%3C/text%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="#/" aria-label="Satoshi Supply Co. home">
+        <span class="brand-mark">₿</span>
+        <span class="brand-name">Satoshi&nbsp;Supply&nbsp;Co.</span>
+      </a>
+      <div class="header-right">
+        <span class="net-badge" title="All payments are on the Bitcoin testnet4 network">
+          <span class="dot"></span> testnet4
+        </span>
+        <a class="header-link" href="#/" data-nav="catalog">Shop</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- CATALOG VIEW -->
+  <main id="view-catalog" class="view">
+    <section class="hero">
+      <div class="wrap">
+        <p class="eyebrow">On-chain checkout · no accounts · no card</p>
+        <h1 class="hero-title">Good coffee.<br />Paid in <span class="accent">Bitcoin</span>.</h1>
+        <p class="hero-sub">
+          Pick something, get a Bitcoin invoice, pay it. That's the whole flow.
+          In this demo the buyer is an <strong>AI agent</strong> spending from a wallet
+          a <strong>Passport Prime</strong> co-signs — small orders clear on their own,
+          larger ones wait for a tap on the device.
+        </p>
+      </div>
+    </section>
+
+    <section class="catalog wrap">
+      <div class="catalog-head">
+        <h2>The shelf</h2>
+        <p class="muted">Prices are in sats. Every order is a fresh on-chain address.</p>
+      </div>
+      <div id="product-grid" class="grid"><!-- cards injected --></div>
+    </section>
+  </main>
+
+  <!-- CHECKOUT VIEW -->
+  <main id="view-checkout" class="view" hidden>
+    <div class="wrap checkout">
+      <a class="back-link" href="#/" data-nav="catalog">← Back to the shop</a>
+      <div class="checkout-grid">
+        <!-- left: order -->
+        <section class="order-card">
+          <div id="order-art" class="order-art">☕</div>
+          <div class="order-body">
+            <span id="order-tag" class="chip">Everyday</span>
+            <h2 id="order-name">Product</h2>
+            <p id="order-variant" class="muted"></p>
+            <div class="order-total">
+              <span class="muted">Order total</span>
+              <span id="order-amount" class="amount">0 sats</span>
+            </div>
+            <p class="fineprint">Pay the exact amount to the address on the right. Status updates live from the testnet4 mempool.</p>
+          </div>
+        </section>
+
+        <!-- right: invoice -->
+        <section class="invoice-card">
+          <div id="pay-state" class="pay-state state-waiting">
+            <span class="state-dot"></span>
+            <span id="pay-state-text">Awaiting payment</span>
+          </div>
+
+          <div class="qr-wrap">
+            <div id="qr" class="qr"><!-- svg --></div>
+          </div>
+
+          <div class="field">
+            <label>Amount</label>
+            <div class="field-row">
+              <code id="inv-amount" class="mono">0 sats</code>
+              <button class="copy-btn" data-copy="inv-amount" title="Copy amount in BTC">copy BTC</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Pay-to address <span class="muted">(testnet4)</span></label>
+            <div class="field-row">
+              <code id="inv-address" class="mono break">—</code>
+              <button class="copy-btn" data-copy="inv-address">copy</button>
+            </div>
+          </div>
+
+          <details class="agent-box" open>
+            <summary>For the agent — full BIP21 invoice</summary>
+            <div class="field-row">
+              <code id="inv-bip21" class="mono break tiny">—</code>
+              <button class="copy-btn" data-copy="inv-bip21">copy</button>
+            </div>
+            <p class="fineprint">An agent reads this string, builds the transaction with <code>nunchuk-cli</code>, and routes it to Prime to co-sign.</p>
+          </details>
+
+          <a id="inv-txlink" class="txlink" href="#" target="_blank" rel="noopener" hidden>View transaction on mempool.space ↗</a>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- PAID OVERLAY -->
+  <div id="paid-overlay" class="paid-overlay" hidden>
+    <div class="paid-card">
+      <div class="check"><svg viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24" /><path d="M14 27l8 8 16-18" /></svg></div>
+      <h2>Payment received</h2>
+      <p id="paid-detail" class="muted">Your order is confirmed.</p>
+      <p class="order-no">Order <span id="paid-order">#SSC-0000</span></p>
+      <div class="paid-actions">
+        <a id="paid-txlink" class="btn ghost" href="#" target="_blank" rel="noopener">View on explorer ↗</a>
+        <a class="btn" href="#/" data-nav="catalog">Back to shop</a>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Satoshi Supply Co. is a demo storefront. It takes <strong>testnet4</strong> coins only — nothing here has real value.</p>
+      <p class="muted">Built to show Passport Prime gating an AI agent's spending. Payments verified live against mempool.space.</p>
+    </div>
+  </footer>
+
+  <script src="assets/qrcode.js"></script>
+  <script src="assets/app.js"></script>
+</body>
+</html>

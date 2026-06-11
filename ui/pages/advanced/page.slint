@@ -1,0 +1,126 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { AppHeader, TextMd, TextSm, BasePage, ScrollBody, IconButton } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { AdvancedPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton, NunchukCard } from "../../nunchuk-widgets.slint";
+
+export component AdvancedPagePage inherits Rectangle {
+    in property <AdvancedPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.AdvancedTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+
+                    // -- Rename ---------------------------------------------------
+                    TextSm { text: TR2.lookup(TrId.AdvancedWalletName); color: Palette.content-tertiary; }
+                    NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedRenameWallet);
+                        primary: false;
+                        clicked => { Navigate.rename-page({ }); }
+                    }
+
+                    // -- Raw descriptor (miniscript) -----------------------------
+                    TextSm { text: TR2.lookup(TrId.AdvancedDescriptorTitle); color: Palette.content-tertiary; }
+                    TextSm {
+                        text: TR2.lookup(TrId.AdvancedDescriptorBody);
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+                    NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            TextSm {
+                                text: Callbacks.detail-descriptor;
+                                color: Nunchuk.on-surface;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedExportToFile);
+                        primary: false;
+                        clicked => {
+                            Callbacks.export-descriptor(Callbacks.detail-id);
+                            if Callbacks.export-ok { Navigate.export-done-page({ }); }
+                        }
+                    }
+                    NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedShowQr);
+                        primary: false;
+                        clicked => { Navigate.descriptor-qr-page({ }); }
+                    }
+                    if Callbacks.export-error != "": TextSm {
+                        text: Callbacks.export-error;
+                        color: Nunchuk.recovery;
+                        wrap: word-wrap;
+                    }
+
+                    // -- Active policy: archive (reversible) --------------------
+                    if !Callbacks.detail-archived: TextSm {
+                        text: TR2.lookup(TrId.AdvancedRemove);
+                        color: Palette.content-tertiary;
+                    }
+                    if !Callbacks.detail-archived: TextSm {
+                        text: TR2.lookup(TrId.AdvancedArchiveBody);
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+                    if !Callbacks.detail-archived: NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedArchivePolicy);
+                        primary: false;
+                        clicked => {
+                            Callbacks.archive-policy(Callbacks.detail-id);
+                            Navigate.home-page({ });
+                        }
+                    }
+
+                    // -- Archived policy: restore, or delete permanently --------
+                    if Callbacks.detail-archived: NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedRestorePolicy);
+                        primary: true;
+                        clicked => {
+                            Callbacks.restore-policy(Callbacks.detail-id);
+                            Navigate.home-page({ });
+                        }
+                    }
+                    if Callbacks.detail-archived: TextSm {
+                        text: TR2.lookup(TrId.AdvancedDangerZone);
+                        color: Nunchuk.recovery;
+                    }
+                    if Callbacks.detail-archived: NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedDeletePermanently);
+                        primary: false;
+                        destructive: true;
+                        // Second confirmation lives on its own screen.
+                        clicked => { Navigate.delete-confirm-page({ }); }
+                    }
+
+                    // Bottom breathing room so the last action isn't flush to the edge.
+                    Rectangle { height: Size.sz6; }
+                }
+            }
+        }
+    }
+}

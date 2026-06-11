@@ -1,0 +1,82 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Nunchuk-branded variants of the KeyOS widgets. Geometry matches the native
+// Button/cards (radius Size.sz6, height Size.sz15); only the colors change.
+import { Size } from "@ui/theme.slint";
+import { TextLg } from "@ui/widgets.slint";
+import { Nunchuk } from "./nunchuk-theme.slint";
+
+// Primary = solid Nunchuk green with black label. Secondary = green outline.
+export component NunchukButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> primary: true;
+    in property <bool> destructive: false;  // red, for irreversible actions
+    in property <bool> enabled: true;
+    in property <bool> compact: false;       // tight padding + single-line label, for chip rows
+
+    // Accent: red when destructive, otherwise Nunchuk green.
+    property <brush> accent: destructive ? Nunchuk.recovery : Nunchuk.green;
+    callback clicked();
+
+    height: Size.sz15;
+    border-radius: Size.sz6;
+    clip: true;
+    background: primary
+        ? (ta.pressed ? Nunchuk.green-dim : root.accent)
+        : #00000000;
+    border-width: primary ? 0px : 2px;
+    border-color: root.accent;
+    opacity: enabled ? 1.0 : 0.4;
+
+    HorizontalLayout {
+        alignment: center;
+        padding-left: root.compact ? Size.sz2 : Size.sz6;
+        padding-right: root.compact ? Size.sz2 : Size.sz6;
+        TextLg {
+            text: root.label;
+            bold: true;
+            vertical-alignment: center;
+            horizontal-alignment: center;
+            // Chip rows must stay on one line; full-width buttons may wrap.
+            wrap: root.compact ? no-wrap : word-wrap;
+            color: root.primary ? Nunchuk.on-green : root.accent;
+        }
+    }
+
+    ta := TouchArea {
+        clicked => {
+            if (root.enabled) {
+                root.clicked();
+            }
+        }
+    }
+}
+
+// Card with a left accent stripe hosting arbitrary children. Accent + fill
+// signal intent: green = normal/destination, red = recovery, grey = change.
+export component NunchukCard inherits Rectangle {
+    in property <bool> recovery: false;
+    in property <bool> change: false;
+    border-radius: Size.sz4;
+    clip: true;
+    background: recovery ? Nunchuk.surface-recovery
+        : (change ? Nunchuk.surface-change : Nunchuk.surface);
+
+    HorizontalLayout {
+        Rectangle {
+            width: 4px;
+            background: root.recovery ? Nunchuk.recovery
+                : (root.change ? Nunchuk.change : Nunchuk.green);
+        }
+        @children
+    }
+}
+
+// A small green brand dot for the header.
+export component NunchukDot inherits Rectangle {
+    width: Size.sz3;
+    height: Size.sz3;
+    border-radius: self.width / 2;
+    background: Nunchuk.green;
+}

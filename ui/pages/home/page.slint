@@ -1,0 +1,727 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, ContentSection, HeadingLg, AppHeader,
+         TextLg, TextMd, TextSm, BasePage, ShieldPage, PageBody, ScrollBody, JumboIcon, Icon, IconButton,
+         OverlayMenu, PopupMenuItem, TimerCircularProgress, QrOverlay, TitledInput } from "@ui/widgets.slint";
+import { Importance, Palette, Size, UISize, IconSize } from "@ui/theme.slint";
+import { Callbacks, PolicyRow } from "../../callbacks.slint";
+import { HomePageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton, NunchukCard, NunchukDot } from "../../nunchuk-widgets.slint";
+
+component PolicyCard inherits Rectangle {
+    in property <PolicyRow> policy;
+    callback clicked();
+    height: 96px;
+
+    NunchukCard {
+        width: 448px;
+        height: parent.height;
+
+        VerticalLayout {
+            padding-left: Size.sz5;
+            padding-right: Size.sz5;
+            alignment: center;
+            spacing: Size.sz0_5;
+
+            TextLg {
+                text: policy.name;
+                color: Nunchuk.on-surface;
+                bold: true;
+                wrap: no-wrap;
+                overflow: elide;
+            }
+            TextSm {
+                text: policy.summary;
+                color: Nunchuk.on-surface-dim;
+            }
+            TextSm {
+                text: policy.checksum;
+                color: Nunchuk.green;
+            }
+        }
+    }
+
+    TouchArea {
+        clicked => { clicked(); }
+    }
+}
+
+export component HomePagePage inherits Rectangle {
+    in property <HomePageProps> props;
+
+    property <bool> is-menu-open: false;
+    // "" = none; "self-custody" | "platform" -> show the explainer before creating.
+    property <string> explainer-model: "";
+    // Explainer is a 4-screen flow (no scrolling): 1 = how it works, 2 = recovery
+    // timelock, 3 = spending limits, 4 = review + start. Reset to 1 whenever a model
+    // is chosen.
+    property <int> explainer-step: 1;
+    // "Learn more" QR overlay on the how-it-works step (Nunchuk CLI link). Non-empty
+    // url = shown; the standard QrOverlay's Close clears it.
+    property <string> learn-more-url: "";
+    // Custom spending-limit entry: "" = closed, else "pertx" / "daily" (which metric
+    // the number keypad is editing). `custom-amount` holds the typed sats string.
+    property <string> custom-target: "";
+    property <string> custom-amount: "";
+
+    // ---- Onboarding model choice (empty state, or "Add wallet") ---------
+    if (Callbacks.policy-count == 0 || Callbacks.adding-wallet) && explainer-model == "" && Callbacks.platform-setup-step == 0: Rectangle {
+        ShieldPage {
+            ContentSection {
+                HorizontalLayout {
+                    alignment: center;
+                    JumboIcon {
+                        name: "jumbo-circle";
+                        Icon { name: "robot"; size: IconSize.px96; color: Nunchuk.green; }
+                    }
+                }
+                HeadingLg {
+                    text: "Set Up Your Agent Wallet";
+                    horizontal-alignment: center;
+                }
+                TextMd {
+                    text: "Choose how the agent's funds are secured. You can read how each option works before committing.";
+                    color: Palette.content-secondary;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+                if Callbacks.import-error != "": TextMd {
+                    text: Callbacks.import-error;
+                    color: Nunchuk.recovery;
+                    horizontal-alignment: center;
+                    wrap: word-wrap;
+                }
+            }
+            // Primary CTA pinned to the bottom.
+            ButtonSection {
+                NunchukButton {
+                    label: "2-of-3 (Adds Platform Key)";
+                    primary: false;
+                    clicked => { Callbacks.adding-wallet = false; explainer-step = 1; explainer-model = "platform"; }
+                }
+                NunchukButton {
+                    label: "2-of-2 (Agent + Passport)";
+                    primary: true;
+                    clicked => { Callbacks.adding-wallet = false; explainer-step = 1; explainer-model = "self-custody"; }
+                }
+            }
+        }
+        // Back chevron top-left, only when adding another wallet from a populated
+        // home (the empty state has no wallet to go back to). Replaces the old
+        // full-width Cancel button.
+        if Callbacks.adding-wallet: IconButton {
+            x: Size.sz8;
+            y: UISize.control-center-status-bar-height + Size.sz5;
+            icon: "chevron-left";
+            size: Size.sz8;
+            importance: Importance.normal;
+            clicked => { Callbacks.adding-wallet = false; }
+        }
+    }
+
+    // ---- Explainer (how it works -> Continue) ---------------------------
+    if explainer-model != "": BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: explainer-step == 1 ? "How it works"
+                     : explainer-step == 2 ? "Recovery timelock"
+                     : explainer-step == 3 ? "Spending limits"
+                     : "Review";
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    // Step 1 leaves the explainer; later steps go back one screen.
+                    // 2-of-3 has no recovery/limit steps, so Review goes back to step 1.
+                    clicked => {
+                        if (explainer-step <= 1) { explainer-model = ""; }
+                        else if (explainer-model == "platform" && explainer-step == 4) { explainer-step = 1; }
+                        else { explainer-step = explainer-step - 1; }
+                    }
+                }
+                Rectangle { }
+            }
+            // -- Step 1: how the chosen model works --
+            if explainer-step == 1: ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+                    HeadingLg {
+                        text: explainer-model == "platform" ? "2-of-3 (Adds Platform Key)" : "2-of-2 (Agent + Passport)";
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    TextMd {
+                        text: explainer-model == "platform"
+                          ? "A 2-of-3 wallet: the agent, this Passport, and Nunchuk's always-online Platform Key.\n\nThe agent keeps spending even when Passport is switched off: agent + Platform Key make 2 signatures, with Nunchuk enforcing your limit on its server. Over that limit the Platform Key won't co-sign, so the spend needs Passport's approval instead.\n\nPassport stays sovereign: the agent + Passport pair never needs Nunchuk, so it can never freeze or move your funds. If your agent builds in a recovery branch, Passport will honour it and can recover on its own after the timelock.\n\nTrade-off: relies on Nunchuk's online service."
+                          : "A 2-of-2 wallet: the agent proposes a spend and this Passport co-signs.\n\nPassport enforces your spending policy on this device. Under your limits it signs automatically; over them it asks for your approval. If the agent key is ever lost, Passport can recover the funds alone after a timelock.\n\nFully sovereign: no third party can freeze or move your funds. Passport must be powered and reachable to co-sign.";
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+                    // Link out to the Nunchuk CLI the agent uses to build the wallet.
+                    TextSm {
+                        text: "Learn more about the Nunchuk CLI";
+                        color: Nunchuk.green;
+                        horizontal-alignment: center;
+                        TouchArea { clicked => { learn-more-url = "https://github.com/nunchuk-io/nunchuk-cli"; } }
+                    }
+                }
+            }
+
+            // -- Step 2: recovery timelock (live scale + stepper + quick presets) --
+            if explainer-step == 2: ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+                    TextMd {
+                        text: "If the agent key is lost, Passport can recover the funds alone after this delay. It's fixed at wallet creation and can't change later, so choose carefully.";
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    // Live readout: blocks + approximate wall-clock time.
+                    HeadingLg {
+                        text: Callbacks.setup-recovery-summary;
+                        color: Nunchuk.green;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    // Stepper: nudge by a day (144 blocks) or a week (1008). Rust clamps.
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Size.sz2;
+                        NunchukButton { label: "-1w"; primary: false; clicked => { Callbacks.set-setup-recovery-blocks(Callbacks.setup-recovery-blocks - 1008); } }
+                        NunchukButton { label: "-1d"; primary: false; clicked => { Callbacks.set-setup-recovery-blocks(Callbacks.setup-recovery-blocks - 144); } }
+                        NunchukButton { label: "+1d"; primary: false; clicked => { Callbacks.set-setup-recovery-blocks(Callbacks.setup-recovery-blocks + 144); } }
+                        NunchukButton { label: "+1w"; primary: false; clicked => { Callbacks.set-setup-recovery-blocks(Callbacks.setup-recovery-blocks + 1008); } }
+                    }
+                    TextSm { text: "Quick set"; color: Palette.content-tertiary; horizontal-alignment: center; }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: Size.sz2;
+                        NunchukButton { label: "1 week"; primary: Callbacks.setup-recovery-blocks == 1008; clicked => { Callbacks.set-setup-recovery-blocks(1008); } }
+                        NunchukButton { label: "1 month"; primary: Callbacks.setup-recovery-blocks == 4320; clicked => { Callbacks.set-setup-recovery-blocks(4320); } }
+                        NunchukButton { label: "3 months"; primary: Callbacks.setup-recovery-blocks == 13140; clicked => { Callbacks.set-setup-recovery-blocks(13140); } }
+                    }
+                }
+            }
+
+            // -- Step 3: spending limits (Passport's on-device policy; editable later) --
+            // Mirrors the controls on the Policy screen (set-per-tx-limit / set-daily-cap).
+            if explainer-step == 3: ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+                    TextMd {
+                        text: explainer-model == "platform"
+                          ? "These limits apply when a spend is routed to Passport for approval. Nunchuk's Platform Key enforces the everyday limit, set in Nunchuk. You can edit these anytime."
+                          : "Passport auto-signs spends under these limits and asks for your approval over them. You can edit them anytime.";
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    TextLg { text: "Auto-sign up to (per transaction)"; color: Palette.content-primary; bold: true; horizontal-alignment: center; wrap: word-wrap; }
+                    HeadingLg {
+                        text: "\{Callbacks.per-tx-limit-display} sats";
+                        color: Nunchuk.green;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        spacing: Size.sz2;
+                        padding-left: Size.sz2;
+                        padding-right: Size.sz2;
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "50k"; primary: Callbacks.per-tx-limit == 50000; clicked => { Callbacks.set-per-tx-limit(50000); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "100k"; primary: Callbacks.per-tx-limit == 100000; clicked => { Callbacks.set-per-tx-limit(100000); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "500k"; primary: Callbacks.per-tx-limit == 500000; clicked => { Callbacks.set-per-tx-limit(500000); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "Custom"; primary: false; clicked => { custom-target = "pertx"; custom-amount = ""; } }
+                    }
+                    TextLg { text: "Daily cap"; color: Palette.content-primary; bold: true; horizontal-alignment: center; }
+                    HeadingLg {
+                        text: Callbacks.daily-cap == 0 ? "Off" : "\{Callbacks.daily-cap-display} sats";
+                        color: Nunchuk.green;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        spacing: Size.sz2;
+                        padding-left: Size.sz2;
+                        padding-right: Size.sz2;
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "500k"; primary: Callbacks.daily-cap == 500000; clicked => { Callbacks.set-daily-cap(500000); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "1M"; primary: Callbacks.daily-cap == 1000000; clicked => { Callbacks.set-daily-cap(1000000); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "Off"; primary: Callbacks.daily-cap == 0; clicked => { Callbacks.set-daily-cap(0); } }
+                        NunchukButton { horizontal-stretch: 1; compact: true; label: "Custom"; primary: false; clicked => { custom-target = "daily"; custom-amount = ""; } }
+                    }
+                }
+            }
+
+            // -- Step 4: review the fixed choices, then start setup --
+            // Fits one ~480px screen without scrolling: one-line intro + three tight cards.
+            if explainer-step == 4: ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz2;
+                    TextSm {
+                        text: "Review your choices. Next you'll set Passport up as the policy co-signer and confirm the finished wallet.";
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding-left: Size.sz5;
+                            padding-right: Size.sz5;
+                            padding-top: Size.sz3;
+                            padding-bottom: Size.sz3;
+                            spacing: Size.sz0_5;
+                            TextSm { text: "Model"; color: Nunchuk.on-surface-dim; }
+                            TextLg {
+                                text: explainer-model == "platform" ? "2-of-3 (Adds Platform Key)" : "2-of-2 (Agent + Passport)";
+                                color: Nunchuk.on-surface;
+                                bold: true;
+                                wrap: no-wrap;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                    // 2-of-2: Passport holds the recovery timelock + everyday auto-sign
+                    // caps, so they're shown here. 2-of-3: the agent designs those in the
+                    // Nunchuk CLI, so Passport just notes where they're set.
+                    if explainer-model != "platform": NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding-left: Size.sz5;
+                            padding-right: Size.sz5;
+                            padding-top: Size.sz3;
+                            padding-bottom: Size.sz3;
+                            spacing: Size.sz0_5;
+                            TextSm { text: "Recovery"; color: Nunchuk.on-surface-dim; }
+                            TextLg {
+                                text: Callbacks.setup-recovery-summary;
+                                color: Nunchuk.on-surface;
+                                bold: true;
+                                wrap: no-wrap;
+                                overflow: elide;
+                            }
+                            TextSm { text: "Passport alone can recover each coin after this delay"; color: Nunchuk.on-surface-dim; wrap: word-wrap; }
+                        }
+                    }
+                    if explainer-model != "platform": NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding-left: Size.sz5;
+                            padding-right: Size.sz5;
+                            padding-top: Size.sz3;
+                            padding-bottom: Size.sz3;
+                            spacing: Size.sz0_5;
+                            TextSm { text: "Spending policy"; color: Nunchuk.on-surface-dim; }
+                            TextLg {
+                                text: "Auto-sign up to \{Callbacks.per-tx-limit-display} sats";
+                                color: Nunchuk.on-surface;
+                                bold: true;
+                                wrap: no-wrap;
+                                overflow: elide;
+                            }
+                            TextSm {
+                                text: "Up to \{Callbacks.daily-cap-display} sats/day, then your approval";
+                                color: Nunchuk.on-surface-dim;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    // 2-of-3: recovery timelock + everyday limit are set by the agent in
+                    // the Nunchuk CLI; Passport displays and enforces them after import.
+                    if explainer-model == "platform": NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding-left: Size.sz5;
+                            padding-right: Size.sz5;
+                            padding-top: Size.sz3;
+                            padding-bottom: Size.sz3;
+                            spacing: Size.sz0_5;
+                            TextSm { text: "Recovery & limits"; color: Nunchuk.on-surface-dim; }
+                            TextLg {
+                                text: "Set by your agent";
+                                color: Nunchuk.on-surface;
+                                bold: true;
+                                wrap: no-wrap;
+                                overflow: elide;
+                            }
+                            TextSm {
+                                text: "The recovery timelock and everyday limit are configured in the Nunchuk CLI. Passport shows and confirms them when you import the wallet.";
+                                color: Nunchuk.on-surface-dim;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                NunchukButton {
+                    // Step 1/2/3 advance; step 4 enters the guided setup wizard.
+                    label: explainer-step < 4
+                           ? "Next"
+                           : "Start setup";
+                    primary: true;
+                    clicked => {
+                        if (explainer-step < 4) {
+                            // 2-of-3 skips the recovery + spending-limit steps (the agent
+                            // sets those in Nunchuk); jump from How it works to Review.
+                            if (explainer-model == "platform" && explainer-step == 1) {
+                                explainer-step = 4;
+                            } else {
+                                explainer-step = explainer-step + 1;
+                            }
+                        } else {
+                            if (explainer-model == "platform") {
+                                // 2-of-3 needs agent + Platform Key + Passport combined in
+                                // Nunchuk, so enter the guided flow rather than minting a
+                                // wallet on-device.
+                                Callbacks.begin-platform-setup();
+                            } else {
+                                Callbacks.setup-self-custody();
+                            }
+                            explainer-model = "";
+                            explainer-step = 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- "Learn more" QR overlay (Nunchuk CLI) --------------------------
+    // Standard KeyOS QR overlay (properly sized), shown when a url is set.
+    if learn-more-url != "": QrOverlay {
+        url <=> learn-more-url;
+        title: "Nunchuk CLI";
+    }
+
+    // Custom spending-limit entry. Tapping the field brings up the device number
+    // keypad (input-type: number). The card sits near the top so the keypad (which
+    // covers the lower half of the screen) doesn't hide the field. Confirms via the
+    // keypad accept or the Set button.
+    if custom-target != "": Rectangle {
+        background: #000000cc;
+        // Dim + absorb taps so the spending-limit chips behind can't be hit; tapping
+        // outside the card dismisses.
+        TouchArea { clicked => { custom-target = ""; } }
+        VerticalLayout {
+            alignment: start;
+            padding-top: Size.sz12;
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 440px;
+                    // Darkest surface, matching the QR overlay's panel.
+                    background: Palette.background-primary;
+                    border-radius: Size.sz4;
+                    // Open the number keypad as soon as the modal appears.
+                    init => { amount-input.focus(); }
+                    // Absorb taps on the card body so they don't fall through to dismiss.
+                    TouchArea { }
+                    VerticalLayout {
+                        padding: Size.sz6;
+                        spacing: Size.sz4;
+                        TextLg {
+                            text: custom-target == "pertx" ? "Per-transaction limit" : "Daily cap";
+                            color: Nunchuk.on-surface;
+                            bold: true;
+                            horizontal-alignment: center;
+                        }
+                        amount-input := TitledInput {
+                            title: "Amount (sats)";
+                            input-type: number;
+                            // Orange focus ring to match the app accent (not system blue).
+                            focus-border-color: Nunchuk.green;
+                            text <=> custom-amount;
+                            accepted(v) => {
+                                Callbacks.set-custom-limit(custom-target, v);
+                                custom-target = "";
+                            }
+                        }
+                        NunchukButton {
+                            label: "Set limit";
+                            primary: true;
+                            clicked => {
+                                Callbacks.set-custom-limit(custom-target, custom-amount);
+                                custom-target = "";
+                            }
+                        }
+                        NunchukButton {
+                            label: "Cancel";
+                            primary: false;
+                            clicked => { custom-target = ""; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Guided wallet setup -------------------------------------------
+    // The agent reads Passport's key over USB and builds the wallet in Nunchuk,
+    // so there's no on-device export action. Two steps: 1 = wait for the wallet,
+    // 2 = import + confirm. Both models use this flow; works from the empty state
+    // and from "Add wallet".
+    if Callbacks.platform-setup-step > 0: BasePage {
+        VerticalLayout {
+            AppHeader {
+                // Single heading; no "Set up 2-of-2 · X of 2" line, no duplicate below.
+                title: Callbacks.platform-setup-step == 1 ? "Waiting for agent" : "Import wallet";
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    // Back steps within the wizard. From step 1 the previous screen is
+                    // the explainer's Review (step 4), so return there rather than
+                    // dumping the user all the way back to the model choice.
+                    clicked => {
+                        if (Callbacks.platform-setup-step <= 1) {
+                            Callbacks.platform-setup-step = 0;
+                            explainer-model = Callbacks.setup-with-platform ? "platform" : "self-custody";
+                            explainer-step = 4;
+                        } else {
+                            Callbacks.platform-setup-step = Callbacks.platform-setup-step - 1;
+                        }
+                    }
+                }
+                Rectangle { }
+            }
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+
+                    TextMd {
+                        text: Callbacks.platform-setup-step == 1
+                              ? (Callbacks.setup-with-platform
+                                 ? "Ask your agent to set up the 2-of-3 wallet (it has the commands) - it'll appear here over USB to approve."
+                                 : "Ask your agent to set up the 2-of-2 wallet (it has the commands) - it'll appear here over USB to approve.")
+                              : "Import the descriptor Nunchuk produced. Passport registers the wallet plus its recovery branch, then starts enforcing your on-device spending policy.";
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    // Step 1 is a passive wait-state: the agent does the work, Passport
+                    // waits. When the USB-CDC link lands, an incoming descriptor should
+                    // auto-advance this to confirmation; until then the spinner is the
+                    // "in progress" affordance and the user taps Continue after building
+                    // the wallet via the agent.
+                    if Callbacks.platform-setup-step == 1: VerticalLayout {
+                        padding-top: Size.sz4;
+                        spacing: Size.sz3;
+                        HorizontalLayout {
+                            alignment: center;
+                            TimerCircularProgress {
+                                indeterminate: true;
+                                running: true;
+                                size: 56px;
+                                front-color: Nunchuk.green;
+                            }
+                        }
+                        // Show Passport's key fingerprint so the agent's build can be
+                        // verified against this device.
+                        TextSm {
+                            text: "Passport's key: \{Callbacks.xpub-fingerprint}";
+                            color: Nunchuk.green;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        TextSm {
+                            text: "Passport continues automatically once the finished wallet arrives over USB. You can also tap Continue to import it manually.";
+                            color: Palette.content-tertiary;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        // Manual case: view the full key + QR (e.g. to hand it off by hand).
+                        TextSm {
+                            text: "Show full key / QR";
+                            color: Nunchuk.green;
+                            horizontal-alignment: center;
+                            TouchArea { clicked => { Navigate.xpub-save-page({ }); } }
+                        }
+                    }
+                    if Callbacks.platform-setup-step == 2 && Callbacks.import-error != "": TextMd {
+                        text: Callbacks.import-error;
+                        color: Nunchuk.recovery;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                // Step 1: advance to import. Step 2: import the wallet. The top-left
+                // arrow handles going back, so no redundant bottom Back/Cancel.
+                NunchukButton {
+                    label: Callbacks.platform-setup-step == 1
+                           ? "Continue"
+                           : "Import wallet descriptor";
+                    primary: true;
+                    clicked => {
+                        if (Callbacks.platform-setup-step == 1) {
+                            Callbacks.platform-setup-step = 2;
+                        } else {
+                            Callbacks.import-policy();
+                            if Callbacks.import-parsed { Navigate.import-review-page({ }); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Populated ------------------------------------------------------
+    if Callbacks.policy-count > 0 && explainer-model == "" && Callbacks.platform-setup-step == 0 && !Callbacks.adding-wallet: BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.AppName);
+                side-padding: Size.sz6;
+                VerticalLayout {
+                    alignment: center;
+                    NunchukDot { }
+                }
+                IconButton {
+                    icon: "ellipsis";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { is-menu-open = !is-menu-open; }
+                }
+            }
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz3;
+                    for entry in Callbacks.policies: PolicyCard {
+                        policy: entry;
+                        clicked => {
+                            Callbacks.select-policy(entry.id);
+                            Navigate.policy-page({ });
+                        }
+                    }
+                    // Fail-closed banner: a corrupt ledger/policy or a failed debit
+                    // paused auto-signing. One tap to resume (resets the budget +
+                    // re-persists a known-good ledger).
+                    if Callbacks.safe-mode: Rectangle {
+                        width: 448px;
+                        background: Nunchuk.surface-recovery;
+                        border-radius: Size.sz3;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz2;
+                            TextMd { text: "Auto-signing paused"; color: Nunchuk.recovery; bold: true; horizontal-alignment: center; }
+                            TextSm { text: Callbacks.safe-mode-reason; color: Palette.content-secondary; horizontal-alignment: center; wrap: word-wrap; }
+                            NunchukButton { label: "Resume auto-signing"; primary: true; clicked => { Callbacks.reset-budget(); } }
+                        }
+                    }
+                    // (Per-wallet freeze + remaining budget are shown on each wallet's
+                    // detail screen, since they're now per-wallet, not device-wide.)
+                    // The agent drives signing over USB; over-policy spends surface
+                    // their own approval screen. No manual sign/verify buttons here.
+                    // A quiet note when spends are queued for a tap.
+                    if Callbacks.pending-approvals > 0: TextSm {
+                        text: Callbacks.pending-approvals == 1
+                              ? "1 spend waiting for your approval"
+                              : "\{Callbacks.pending-approvals} spends waiting for your approval";
+                        color: Nunchuk.recovery;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    TextSm {
+                        text: "Connected over USB. The agent's spend requests appear here automatically.";
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Empty-state kebab (always, so Import lives here, not on the CTAs) --
+    if Callbacks.policy-count == 0 && explainer-model == "" && Callbacks.platform-setup-step == 0: IconButton {
+        x: root.width - self.width - Size.sz8;
+        y: UISize.control-center-status-bar-height + Size.sz5;
+        icon: "ellipsis";
+        size: Size.sz8;
+        importance: Importance.normal;
+        clicked => { is-menu-open = !is-menu-open; }
+    }
+
+    // ---- Shared kebab menu ----------------------------------------------
+    if is-menu-open: OverlayMenu {
+        touched-off => { is-menu-open = false; }
+
+        // Empty state: import an existing wallet instead of creating one.
+        if Callbacks.policy-count == 0: PopupMenuItem {
+            label: "Import existing wallet";
+            icon: "import";
+            first: true;
+            last: Callbacks.archived-count == 0;
+            clicked => {
+                is-menu-open = false;
+                Callbacks.import-policy();
+                if Callbacks.import-parsed { Navigate.import-review-page({ }); }
+            }
+        }
+        // Populated: add another wallet via the same guided flow (choose model ->
+        // agent reads Passport's key -> Nunchuk builds it -> confirm). The agent can
+        // also just push a new descriptor over USB and it auto-surfaces for approval.
+        if Callbacks.policy-count > 0: PopupMenuItem {
+            label: "Add wallet";
+            icon: "import";
+            first: true;
+            last: false;
+            clicked => {
+                is-menu-open = false;
+                Callbacks.adding-wallet = true;
+            }
+        }
+        // Populated: export Passport's key (NOT a live connection).
+        if Callbacks.policy-count > 0: PopupMenuItem {
+            label: "Export key";
+            icon: "export";
+            first: false;
+            last: false;
+            clicked => {
+                is-menu-open = false;
+                Callbacks.export-xpub();
+                Navigate.xpub-page({ });
+            }
+        }
+        if Callbacks.policy-count > 0: PopupMenuItem {
+            label: "Activity";
+            icon: "history";
+            first: false;
+            last: Callbacks.archived-count == 0;
+            clicked => {
+                is-menu-open = false;
+                Callbacks.show-activity();
+                Navigate.activity-page({ });
+            }
+        }
+        if Callbacks.archived-count > 0: PopupMenuItem {
+            label: TR2.format(TrId.HomeArchivedPoliciesCount, [Callbacks.archived-count]);
+            icon: "archive";
+            first: Callbacks.policy-count == 0;
+            last: true;
+            clicked => {
+                is-menu-open = false;
+                Navigate.archive-page({ });
+            }
+        }
+    }
+}

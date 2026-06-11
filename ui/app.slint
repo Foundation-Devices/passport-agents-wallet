@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { Router } from "gen/router.slint";
+import { Callbacks } from "callbacks.slint";
+import { Navigate } from "gen/navigate.slint";
+import { BaseWindow } from "@ui/widgets.slint";
+import { CurrentTheme, Images, Utils } from "@ui/theme.slint";
+import { TR } from "@ui/i18n/i18n.slint";
+
+export component AppWindow inherits BaseWindow {
+    Router { }
+    // HSM mode: poll the host bridge and auto-sign in-policy PSBTs unattended.
+    hsm-timer := Timer {
+        interval: 2s;
+        running: Callbacks.hsm-enabled;
+        triggered => { Callbacks.hsm-poll(); }
+    }
+    // USB->UI bridge: drain background signals from the USB-CDC thread on the main
+    // thread. Refreshes after a USB sign; when a pushed descriptor needs approval it
+    // routes to the import-review screen so the user enrols it with a tap.
+    usb-timer := Timer {
+        interval: 1s;
+        running: true;
+        triggered => {
+            Callbacks.poll-usb-events();
+            if Callbacks.usb-review-pending {
+                Callbacks.usb-review-pending = false;
+                Navigate.import-review-page({ });
+            }
+            if Callbacks.usb-sign-pending {
+                Callbacks.usb-sign-pending = false;
+                Navigate.review-page({ });
+            }
+        }
+    }
+}
+
+export * from "gen/exports.slint";
+export { Callbacks, CurrentTheme, Images, Utils, TR }

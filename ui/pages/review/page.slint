@@ -1,0 +1,277 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, TextLg, TextMd, TextSm, BasePage,
+         ScrollBody, IconButton, TimerCircularProgress, JumboIcon, Icon } from "@ui/widgets.slint";
+import { Importance, Palette, Size, IconSize } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { ReviewPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton, NunchukCard } from "../../nunchuk-widgets.slint";
+
+export component ReviewPagePage inherits Rectangle {
+    in property <ReviewPageProps> props;
+
+    // Two-screen review (no scrolling): 1 = transaction details, 2 = approve + sign.
+    // Resets to 1 each time the page is navigated to (component re-instantiated).
+    property <int> review-step: 1;
+
+    // Deferred sign: the slide flips `signing` on so the spinner paints, then this
+    // one-shot timer fires on the next tick to run the (synchronous) sign.
+    sign-timer := Timer {
+        interval: 50ms;
+        running: false;
+        triggered => {
+            sign-timer.running = false;
+            Callbacks.approve();
+        }
+    }
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: review-step == 2 ? "Approve & sign" : TR2.lookup(TrId.ReviewTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    // Step 2 backs to the details; step 1 defers the spend (drops it so
+                    // the next queued approval can surface).
+                    clicked => {
+                        if (review-step == 2) {
+                            review-step = 1;
+                        } else {
+                            Callbacks.reject-pending-sign();
+                            Navigate.home-page({ });
+                        }
+                    }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;  // 16px → 448px content fits 480px screen (no h-scroll)
+                VerticalLayout {
+                    spacing: Size.sz3;
+
+                    // Reading + matching the PSBT (runs on a worker thread, so this
+                    // spinner animates while it works).
+                    if Callbacks.psbt-loading: VerticalLayout {
+                        padding-top: Size.sz8;
+                        spacing: Size.sz4;
+                        HorizontalLayout {
+                            alignment: center;
+                            TimerCircularProgress {
+                                indeterminate: true;
+                                running: true;
+                                size: 64px;
+                                front-color: Nunchuk.green;
+                            }
+                        }
+                        TextMd {
+                            text: TR2.lookup(TrId.ReviewLoadingTitle);
+                            color: Nunchuk.green;
+                            horizontal-alignment: center;
+                        }
+                        TextSm {
+                            text: TR2.lookup(TrId.ReviewLoadingDetail);
+                            color: Palette.content-secondary;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    // Once the device has signed: a clean centered success screen —
+                    // checkmark, "Signed", and a one-line amount summary. No files.
+                    if Callbacks.review-signed: VerticalLayout {
+                        spacing: Size.sz3;
+                        padding-top: Size.sz8;
+                        HorizontalLayout {
+                            alignment: center;
+                            JumboIcon {
+                                name: "jumbo-circle";
+                                Icon { name: "check"; size: IconSize.px96; color: Nunchuk.green; }
+                            }
+                        }
+                        TextLg {
+                            text: TR2.lookup(TrId.ReviewSignedTitle);
+                            color: Nunchuk.green;
+                            bold: true;
+                            horizontal-alignment: center;
+                        }
+                        TextMd {
+                            text: Callbacks.review-total-out + " · " + Callbacks.review-wallet-name;
+                            color: Palette.content-secondary;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    // ===== STEP 1: transaction details =====
+                    if Callbacks.review-matched && review-step == 1: TextSm { text: TR2.lookup(TrId.ReviewSigningFor); color: Palette.content-tertiary; }
+                    if Callbacks.review-matched && review-step == 1: TextLg {
+                        text: Callbacks.review-wallet-name;
+                        color: Palette.content-primary;
+                        bold: true;
+                        wrap: word-wrap;
+                    }
+                    if Callbacks.review-matched && review-step == 1: TextSm { text: TR2.lookup(TrId.ReviewActivePath); color: Palette.content-tertiary; }
+                    if Callbacks.review-matched && review-step == 1: TextLg {
+                        text: Callbacks.review-path-label;
+                        color: Callbacks.review-is-recovery ? Nunchuk.recovery : Nunchuk.green;
+                        bold: true;
+                        wrap: word-wrap;
+                    }
+                    if Callbacks.review-is-recovery && review-step == 1: NunchukCard {
+                        width: 448px;
+                        recovery: true;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            alignment: center;
+                            TextMd { text: Callbacks.review-warning; color: Nunchuk.on-surface; wrap: word-wrap; }
+                        }
+                    }
+                    // One card per output (sending = green, change = muted). Shown on
+                    // BOTH steps: the destination must be visible at the moment of the
+                    // final sign tap, not just on the earlier details screen.
+                    if Callbacks.review-matched && (review-step == 1 || (review-step == 2 && !Callbacks.review-signed)): TextSm { text: TR2.lookup(TrId.ReviewOutputs); color: Palette.content-tertiary; }
+                    for o in (Callbacks.review-matched && (review-step == 1 || (review-step == 2 && !Callbacks.review-signed))) ? Callbacks.review-output-rows : []: NunchukCard {
+                        width: 448px;
+                        change: o.is-change;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz1;
+                            HorizontalLayout {
+                                spacing: Size.sz2;
+                                alignment: space-between;
+                                TextSm {
+                                    text: o.is-change ? TR2.lookup(TrId.ReviewChangeOutput) : TR2.lookup(TrId.ReviewSendingOutput);
+                                    color: o.is-change ? Nunchuk.change : Nunchuk.green;
+                                    bold: true;
+                                }
+                                TextMd { text: o.amount; color: Nunchuk.on-surface; bold: true; horizontal-alignment: right; }
+                            }
+                            TextSm { text: o.address; color: Nunchuk.on-surface-dim; wrap: word-wrap; }
+                        }
+                    }
+                    if Callbacks.review-matched && review-step == 1: HorizontalLayout {
+                        spacing: Size.sz2;
+                        alignment: space-between;
+                        TextSm { text: TR2.lookup(TrId.ReviewNetworkFee); color: Palette.content-tertiary; vertical-alignment: center; }
+                        TextMd { text: Callbacks.review-fee; color: Palette.content-primary; horizontal-alignment: right; }
+                    }
+                    if Callbacks.review-matched && review-step == 1: HorizontalLayout {
+                        spacing: Size.sz2;
+                        alignment: space-between;
+                        TextMd { text: TR2.lookup(TrId.ReviewTotalLeaving); color: Palette.content-primary; bold: true; vertical-alignment: center; }
+                        TextMd { text: Callbacks.review-total-out; color: Nunchuk.green; bold: true; horizontal-alignment: right; }
+                    }
+
+                    // ===== STEP 2: approve + sign =====
+                    if Callbacks.review-matched && review-step == 2 && !Callbacks.review-signed: TextSm { text: TR2.lookup(TrId.ReviewSigningFor); color: Palette.content-tertiary; }
+                    if Callbacks.review-matched && review-step == 2 && !Callbacks.review-signed: TextLg {
+                        text: Callbacks.review-wallet-name;
+                        color: Palette.content-primary;
+                        bold: true;
+                        wrap: word-wrap;
+                    }
+                    if Callbacks.review-matched && review-step == 2 && !Callbacks.review-signed: HorizontalLayout {
+                        spacing: Size.sz2;
+                        alignment: space-between;
+                        TextMd { text: TR2.lookup(TrId.ReviewTotalLeaving); color: Palette.content-primary; bold: true; vertical-alignment: center; }
+                        TextMd { text: Callbacks.review-total-out; color: Nunchuk.green; bold: true; horizontal-alignment: right; }
+                    }
+                    // Policy gate: over a cap -> physical approval (the slide below IS the tap).
+                    if Callbacks.review-matched && review-step == 2 && Callbacks.review-can-sign && !Callbacks.review-signed && !Callbacks.review-gate-auto: Rectangle {
+                        width: 448px;
+                        background: Nunchuk.surface-recovery;
+                        border-radius: Size.sz3;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz2;
+                            TextMd { text: "Approval required"; color: Nunchuk.recovery; bold: true; horizontal-alignment: center; }
+                            TextSm { text: Callbacks.review-gate-reason; color: Palette.content-secondary; horizontal-alignment: center; wrap: word-wrap; }
+                        }
+                    }
+
+                    // No match (or blocked): a clean centered alert instead of empty
+                    // section scaffolding.
+                    if !Callbacks.review-matched && !Callbacks.review-signed && !Callbacks.psbt-loading: VerticalLayout {
+                        spacing: Size.sz3;
+                        padding-top: Size.sz6;
+                        HorizontalLayout {
+                            alignment: center;
+                            JumboIcon {
+                                name: "jumbo-circle";
+                                Icon { name: "alert"; size: IconSize.px96; color: Nunchuk.recovery; }
+                            }
+                        }
+                        TextLg {
+                            text: TR2.lookup(TrId.ReviewCantSignTitle);
+                            color: Nunchuk.recovery;
+                            bold: true;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        TextMd {
+                            text: Callbacks.review-status;
+                            color: Palette.content-secondary;
+                            horizontal-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+
+            ButtonSection {
+                // Inset to match the content cards + lift off the bottom edge.
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                // Signed: the signature is already on its way back to the host over
+                // USB, so there's nothing to save — just acknowledge and go home.
+                if Callbacks.review-signed: NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonDone);
+                    primary: true;
+                    clicked => { Navigate.home-page({ }); }
+                }
+                // While signing: a Nunchuk-green spinner (sign runs on the next tick).
+                if Callbacks.signing && !Callbacks.review-signed: HorizontalLayout {
+                    alignment: center;
+                    spacing: Size.sz3;
+                    TimerCircularProgress {
+                        indeterminate: true;
+                        running: true;
+                        size: 40px;
+                        front-color: Nunchuk.green;
+                    }
+                    TextMd {
+                        text: TR2.lookup(TrId.CommonSlideToSignSigning);
+                        color: Nunchuk.green;
+                        vertical-alignment: center;
+                    }
+                }
+                // Step 1: advance to the approve screen.
+                if !Callbacks.review-signed && !Callbacks.signing && Callbacks.review-matched && Callbacks.review-can-sign && review-step == 1: NunchukButton {
+                    label: "Review & sign";
+                    primary: true;
+                    clicked => { review-step = 2; }
+                }
+                // Step 2: a deliberate tap to sign. (A slide gesture didn't track
+                // reliably on the hardware panel; the two-step Review -> Approve flow
+                // already supplies the intent.) The header back arrow is the way out.
+                if !Callbacks.review-signed && !Callbacks.signing && Callbacks.review-matched && Callbacks.review-can-sign && review-step == 2: NunchukButton {
+                    label: Callbacks.review-is-recovery ? TR2.lookup(TrId.ReviewSignRecoverySpend) : TR2.lookup(TrId.CommonSlideToSignSign);
+                    primary: true;
+                    clicked => {
+                        Callbacks.signing = true;
+                        sign-timer.running = true;
+                    }
+                }
+            }
+        }
+    }
+}

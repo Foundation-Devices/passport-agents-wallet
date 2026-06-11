@@ -1,0 +1,9 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="96" height="96" rx="22" fill="#162B20"/>
+  <!-- "Agents" robot head — matches the in-app `robot` glyph (ui/pages/home) -->
+  <path d="M46 18h4v11h-4z" fill="#00FF66"/>
+  <circle cx="48" cy="13" r="5" fill="#00FF66"/>
+  <path d="M18 47h6v14h-6z" fill="#00FF66"/>
+  <path d="M72 47h6v14h-6z" fill="#00FF66"/>
+  <path fill-rule="evenodd" clip-rule="evenodd" d="M36 28h24a12 12 0 0 1 12 12v24a12 12 0 0 1-12 12H36a12 12 0 0 1-12-12V40a12 12 0 0 1 12-12ZM40 44a5 5 0 1 0 0 10 5 5 0 0 0 0-10Zm16 0a5 5 0 1 0 0 10 5 5 0 0 0 0-10ZM39 62a3 3 0 0 0 0 6h18a3 3 0 0 0 0-6H39Z" fill="#00FF66"/>
+</svg>

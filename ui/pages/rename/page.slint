@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, TextMd, BasePage, ScrollBody, IconButton,
+         TitledInput } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { RenamePageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component RenamePagePage inherits Rectangle {
+    in property <RenamePageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.RenameTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz4;
+                    TextMd {
+                        text: TR2.lookup(TrId.RenameBody);
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+                    TitledInput {
+                        title: TR2.lookup(TrId.ImportReviewWalletName);
+                        placeholder: TR2.lookup(TrId.ImportReviewWalletNamePlaceholder);
+                        caps-mode: sentences;
+                        text <=> Callbacks.rename-value;
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                NunchukButton {
+                    label: TR2.lookup(TrId.RenameSaveName);
+                    primary: true;
+                    clicked => {
+                        Callbacks.rename-policy(Callbacks.detail-id, Callbacks.rename-value);
+                        Navigate.backward();
+                    }
+                }
+            }
+        }
+    }
+}

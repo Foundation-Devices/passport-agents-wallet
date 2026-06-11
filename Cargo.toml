@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "gui-app-nunchuk-signer"
+version = "0.1.0"
+edition = "2021"
+authors = ["Foundation Devices, Inc. <hello@foundation.xyz>"]
+license = "GPL-3.0-or-later"
+
+[dependencies]
+# KeyOS plumbing
+fs = { workspace = true }
+log = { workspace = true }
+log-server = { workspace = true }
+ngwallet = { workspace = true }
+security = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+server = { workspace = true }
+slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
+usb = { workspace = true }
+
+# Cross-target utilities
+anyhow = "1"
+base64 = "0.22"
+hex = "0.4"
+
+# Descriptor/policy/PSBT/signing logic lives in src/nunchuk/, built on ngwallet's
+# bitcoin + miniscript so it compiles for BOTH the host simulator and the
+# armv7a-unknown-xous-elf device target. Mirrors the host-tested
+# `nunchuk-signer-core` reference crate.
+
+[target.'cfg(target_os = "xous")'.dependencies]
+xous = { path = "../../xous/xous-rs" }
+
+[build-dependencies]
+slint-keyos-platform-build = { path = "../../slint-keyos-platform/build", default-features = false }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

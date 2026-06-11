@@ -1,0 +1,79 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ContentSection, AppHeader, TextLg, TextMd, TextSm, BasePage,
+         PageBody, IconButton, JumboIcon, Icon } from "@ui/widgets.slint";
+import { Importance, Palette, Size, IconSize } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { VerifyPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard } from "../../nunchuk-widgets.slint";
+
+export component VerifyPagePage inherits Rectangle {
+    in property <VerifyPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.VerifyTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz3;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: Size.sz2;
+                        JumboIcon {
+                            name: "jumbo-circle";
+                            // Nunchuk-green check when verified, red warning when not.
+                            Icon {
+                                name: Callbacks.verify-matched ? "check" : "alert";
+                                size: IconSize.px96;
+                                color: Callbacks.verify-matched ? Nunchuk.green : Nunchuk.recovery;
+                            }
+                        }
+                    }
+
+                    TextLg {
+                        text: Callbacks.verify-title;
+                        color: Callbacks.verify-matched ? Nunchuk.green : Nunchuk.recovery;
+                        bold: true;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    TextMd {
+                        text: Callbacks.verify-detail;
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+
+                    if Callbacks.verify-addr != "": NunchukCard {
+                        width: 448px;
+                        height: 96px;
+                        recovery: !Callbacks.verify-matched;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            alignment: center;
+                            TextSm { text: TR2.lookup(TrId.VerifyAddressLabel); color: Nunchuk.on-surface-dim; }
+                            TextMd { text: Callbacks.verify-addr; color: Nunchuk.on-surface; wrap: word-wrap; }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

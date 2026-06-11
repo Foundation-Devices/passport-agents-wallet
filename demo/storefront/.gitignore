@@ -1,0 +1,6 @@
+node_modules/
+package-lock.json
+# disposable testnet4 merchant key (contains a mnemonic) — regenerate with gen-merchant.mjs
+merchant.json
+# in-memory order state (rotating address cursor + orders) — runtime only
+.server-state.json

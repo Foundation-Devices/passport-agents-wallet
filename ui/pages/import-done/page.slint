@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, ContentSection, AppHeader, HeadingLg, TextMd, TextSm, BasePage,
+         PageBody, JumboIcon, Icon } from "@ui/widgets.slint";
+import { Palette, Size, IconSize } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { ImportDonePageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component ImportDonePagePage inherits Rectangle {
+    in property <ImportDonePageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.ImportDoneTitle);
+                side-padding: Size.sz6;
+                Rectangle { }
+                Rectangle { }
+            }
+
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz3;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: Size.sz6;
+                        JumboIcon {
+                            name: "jumbo-circle";
+                            Icon { name: "check"; size: IconSize.px96; color: Nunchuk.green; }
+                        }
+                    }
+
+                    HeadingLg { text: TR2.lookup(TrId.ImportDoneTitle); horizontal-alignment: center; }
+                    TextMd {
+                        text: TR2.format(TrId.ImportDoneBody, [Callbacks.detail-name]);
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    TextSm {
+                        text: Callbacks.detail-checksum;
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                ButtonSection {
+                    NunchukButton {
+                        label: TR2.lookup(TrId.CommonButtonDone);
+                        primary: true;
+                        clicked => { Navigate.home-page({ }); }
+                    }
+                }
+            }
+        }
+    }
+}

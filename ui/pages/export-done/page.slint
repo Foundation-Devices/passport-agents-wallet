@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, ContentSection, AppHeader, HeadingLg, TextMd, BasePage,
+         PageBody, JumboIcon, Icon } from "@ui/widgets.slint";
+import { Palette, Size, IconSize } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { ExportDonePageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component ExportDonePagePage inherits Rectangle {
+    in property <ExportDonePageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: Callbacks.export-done-title;
+                side-padding: Size.sz6;
+                Rectangle { }
+                Rectangle { }
+            }
+
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz3;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: Size.sz6;
+                        JumboIcon {
+                            name: "jumbo-circle";
+                            Icon { name: "check"; size: IconSize.px96; color: Nunchuk.green; }
+                        }
+                    }
+
+                    HeadingLg { text: Callbacks.export-done-title; horizontal-alignment: center; }
+                    TextMd {
+                        text: Callbacks.export-done-detail;
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                }
+
+                ButtonSection {
+                    NunchukButton {
+                        label: TR2.lookup(TrId.CommonButtonDone);
+                        primary: true;
+                        clicked => { Navigate.home-page({ }); }
+                    }
+                }
+            }
+        }
+    }
+}

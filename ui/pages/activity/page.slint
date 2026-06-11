@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { AppHeader, TextLg, TextMd, TextSm, BasePage, ScrollBody, IconButton } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks, ActivityRow } from "../../callbacks.slint";
+import { ActivityPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard } from "../../nunchuk-widgets.slint";
+
+export component ActivityPagePage inherits Rectangle {
+    in property <ActivityPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: "Activity";
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+                    if Callbacks.activity-rows.length == 0: TextMd {
+                        text: "No signing activity yet. When the agent spends within policy, Passport auto-signs it and it shows up here. Spends you approve on the device appear here too.";
+                        color: Palette.content-secondary;
+                        wrap: word-wrap;
+                    }
+                    for a in Callbacks.activity-rows: NunchukCard {
+                        width: 448px;
+                        HorizontalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz3;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: Size.sz0_5;
+                                TextMd { text: a.amount; color: Nunchuk.on-surface; bold: true; }
+                                // With several wallets enrolled, name which one this was for.
+                                if Callbacks.activity-multi-wallet && a.wallet != "": TextSm {
+                                    text: a.wallet;
+                                    color: Nunchuk.green;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                }
+                                TextSm { text: a.dest; color: Nunchuk.on-surface-dim; wrap: no-wrap; overflow: elide; }
+                                TextSm { text: a.txid; color: Palette.content-tertiary; }
+                            }
+                            VerticalLayout {
+                                alignment: center;
+                                TextSm {
+                                    text: a.kind;
+                                    // Declined = red alert; Approved = orange (you acted);
+                                    // everything else = green (signed within policy).
+                                    color: a.kind == "Declined" ? Nunchuk.recovery
+                                         : a.kind == "Approved" ? Nunchuk.recovery
+                                         : Nunchuk.green;
+                                    bold: true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

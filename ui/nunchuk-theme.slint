@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// Nunchuk brand palette: deep teal-navy surfaces (#031f2b / #395a56) with the
+// signature Bitcoin-orange accent for CTAs. Applied over Passport's dark shell so
+// the app reads as a Nunchuk integration. Property names are kept from the signer
+// template so the pages bind unchanged (the "green*" names now carry the orange
+// accent + teal borders).
+export global Nunchuk {
+    // Hero accent (Nunchuk orange) + variants.
+    out property <brush> green: #FF8C00;        // ORANGE — primary CTA / accents
+    out property <brush> green-dim: #C46E00;     // pressed / muted orange
+    out property <brush> green-dark: #2E5350;    // teal-green — borders / dividers
+
+    // Surfaces (deep teal-navy).
+    out property <brush> surface: #0C2E3C;          // teal card on the dark shell
+    out property <brush> surface-recovery: #3A1A12; // warm-tinted card for over-limit / approval
+    out property <brush> surface-change: #16242B;   // de-emphasized teal-grey card (change)
+    out property <brush> change: #667085;           // slate accent for change outputs
+
+    // Warning / approval-required.
+    out property <brush> recovery: #E24E1B;       // orange-red — approval / alert
+
+    // Content.
+    out property <brush> on-green: #1B1B1B;        // near-black text on the orange fill
+    out property <brush> on-surface: #FFFFFF;
+    out property <brush> on-surface-dim: #9CA3AF;  // slate grey
+}

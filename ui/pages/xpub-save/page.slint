@@ -1,0 +1,78 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, TextLg, TextSm, BasePage,
+         ScrollBody, IconButton, Qrcode } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { XpubSavePageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard, NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component XpubSavePagePage inherits Rectangle {
+    in property <XpubSavePageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.XpubSaveTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz4;
+
+                    TextSm { text: TR2.lookup(TrId.XpubSaveKeyLabel); color: Palette.content-tertiary; }
+                    TextLg { text: Callbacks.xpub-fingerprint; color: Nunchuk.green; bold: true; }
+                    NunchukCard {
+                        width: 448px;
+                        VerticalLayout {
+                            padding: Size.sz4;
+                            TextSm { text: Callbacks.xpub-value; color: Nunchuk.on-surface; wrap: word-wrap; }
+                        }
+                    }
+
+                    // The agent reads this over USB, but a QR lets you hand the key off
+                    // by sight (e.g. scan it into a wallet app on another machine).
+                    HorizontalLayout {
+                        alignment: center;
+                        Qrcode {
+                            width: 320px;
+                            height: 320px;
+                            data: Callbacks.xpub-value;
+                        }
+                    }
+
+                    if Callbacks.export-error != "": TextSm {
+                        text: Callbacks.export-error;
+                        color: Nunchuk.recovery;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                // The agent reads this key over USB; no manual file save needed.
+                NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonDone);
+                    primary: true;
+                    clicked => { Navigate.home-page({ }); }
+                }
+            }
+        }
+    }
+}

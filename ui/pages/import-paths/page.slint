@@ -1,0 +1,130 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, AppHeader, TextLg, TextMd, TextSm, BasePage,
+         ScrollBody, IconButton, Icon } from "@ui/widgets.slint";
+import { Importance, Palette, Size } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { ImportPathsPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukCard, NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component ImportPathsPagePage inherits Rectangle {
+    in property <ImportPathsPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.ImportPathsTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    // Back to the explainer; keeps the staged import (no cancel).
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            ScrollBody {
+                p-x: Size.sz4;
+                VerticalLayout {
+                    spacing: Size.sz3;
+
+                    TextSm { text: TR2.lookup(TrId.ImportPathsSpendIntro); color: Palette.content-tertiary; }
+
+                    // One card per spend path, with a leading icon: a green check
+                    // for the always-available path, an hourglass for time-locked
+                    // recovery paths.
+                    for p in Callbacks.detail-paths: NunchukCard {
+                        width: 448px;
+                        recovery: p.is-recovery;
+                        HorizontalLayout {
+                            padding: Size.sz4;
+                            spacing: Size.sz3;
+                            VerticalLayout {
+                                alignment: start;
+                                Icon {
+                                    name: p.is-recovery ? "hourglass" : "check-circle";
+                                    size: 36px;
+                                    color: p.is-recovery ? Nunchuk.recovery : Nunchuk.green;
+                                }
+                            }
+                            VerticalLayout {
+                                spacing: Size.sz1;
+                                horizontal-stretch: 1;
+                                TextSm {
+                                    text: p.kind-label;
+                                    color: p.is-recovery ? Nunchuk.recovery : Nunchuk.green;
+                                    bold: true;
+                                }
+                                TextLg { text: p.headline; color: Nunchuk.on-surface; bold: true; wrap: word-wrap; }
+                                TextSm { text: p.detail; color: Nunchuk.on-surface-dim; wrap: word-wrap; }
+                            }
+                        }
+                    }
+
+                    // Keys, each with a key icon (green when this Passport holds it).
+                    TextSm { text: TR2.lookup(TrId.ImportPathsKeysTitle); color: Palette.content-tertiary; }
+                    for s in Callbacks.detail-signers: HorizontalLayout {
+                        spacing: Size.sz3;
+                        alignment: start;
+                        VerticalLayout {
+                            alignment: center;
+                            Icon {
+                                name: "key";
+                                size: 28px;
+                                color: s.owned ? Nunchuk.green : Palette.content-tertiary;
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: Size.sz0_5;
+                            horizontal-stretch: 1;
+                            TextMd {
+                                text: s.detail;
+                                color: s.owned ? Nunchuk.green : Palette.content-primary;
+                                bold: true;
+                                wrap: word-wrap;
+                            }
+                            TextSm {
+                                text: TR2.format(TrId.ImportPathsKeyFingerprint, [s.fingerprint]);
+                                color: Palette.content-tertiary;
+                            }
+                        }
+                    }
+                    if Callbacks.import-error != "": TextSm {
+                        text: Callbacks.import-error;
+                        color: Nunchuk.recovery;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+
+            ButtonSection {
+                padding-left: Size.sz6;
+                padding-right: Size.sz6;
+                padding-bottom: Size.sz6;
+                // Primary action is the lower button (closest to thumb).
+                NunchukButton {
+                    label: TR2.lookup(TrId.CommonButtonCancel);
+                    primary: false;
+                    clicked => {
+                        Callbacks.cancel-import();
+                        Navigate.home-page({ });
+                    }
+                }
+                NunchukButton {
+                    label: TR2.lookup(TrId.ImportPathsConfirmAndAdd);
+                    primary: true;
+                    clicked => {
+                        Callbacks.confirm-import();
+                        if Callbacks.import-committed { Navigate.import-done-page({ }); }
+                    }
+                }
+            }
+        }
+    }
+}

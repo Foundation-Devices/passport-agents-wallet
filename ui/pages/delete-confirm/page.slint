@@ -1,0 +1,78 @@
+// SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+import { ButtonSection, ContentSection, AppHeader, HeadingLg, TextMd, TextSm, BasePage,
+         PageBody, JumboIcon, Icon, IconButton } from "@ui/widgets.slint";
+import { Importance, Palette, Size, IconSize } from "@ui/theme.slint";
+import { Callbacks } from "../../callbacks.slint";
+import { DeleteConfirmPageProps } from "./props.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { TR2, TrId } from "../../gen/tr.slint";
+import { Nunchuk } from "../../nunchuk-theme.slint";
+import { NunchukButton } from "../../nunchuk-widgets.slint";
+
+export component DeleteConfirmPagePage inherits Rectangle {
+    in property <DeleteConfirmPageProps> props;
+
+    BasePage {
+        VerticalLayout {
+            AppHeader {
+                title: TR2.lookup(TrId.DeleteConfirmTitle);
+                side-padding: Size.sz6;
+                IconButton {
+                    icon: "chevron-left";
+                    size: Size.sz8;
+                    importance: Importance.normal;
+                    clicked => { Navigate.backward(); }
+                }
+                Rectangle { }
+            }
+
+            PageBody {
+                ContentSection {
+                    spacing: Size.sz3;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        padding-top: Size.sz4;
+                        JumboIcon {
+                            name: "jumbo-circle";
+                            Icon { name: "alert"; size: IconSize.px96; color: Nunchuk.recovery; }
+                        }
+                    }
+
+                    HeadingLg { text: TR2.lookup(TrId.DeleteConfirmHeading); horizontal-alignment: center; }
+                    TextMd {
+                        text: TR2.format(TrId.DeleteConfirmBody, [Callbacks.detail-name]);
+                        color: Palette.content-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    TextSm {
+                        text: Callbacks.detail-checksum;
+                        color: Palette.content-tertiary;
+                        horizontal-alignment: center;
+                    }
+                }
+
+                ButtonSection {
+                    // Primary action is the lower button (closest to thumb).
+                    NunchukButton {
+                        label: TR2.lookup(TrId.CommonButtonCancel);
+                        primary: false;
+                        clicked => { Navigate.backward(); }
+                    }
+                    NunchukButton {
+                        label: TR2.lookup(TrId.AdvancedDeletePermanently);
+                        primary: true;
+                        destructive: true;
+                        clicked => {
+                            Callbacks.delete-policy(Callbacks.detail-id);
+                            Navigate.home-page({ });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
