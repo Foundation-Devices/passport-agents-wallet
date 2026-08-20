@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2026 Foundation Devices, Inc. <hello@foundation.xyz>
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Foundation application configuration. This is the authored source of truth;
+# `manifest.toml` is GENERATED from it by the Foundation CLI (and gitignored).
+
+app-name = "gui-app-nunchuk-signer"
+friendly-app-name = "Agents Wallet"
+launcher-app-name = "Agents"
+description = "Hardware-enforced spending-policy co-signer for an AI agent's Bitcoin wallet"
+icon = "resources/icon.svg"
+theme = "resources/theme.json"
+# ASCII "nunchuk-sign-app" (exactly 16 bytes / 0x + 32 hex).
+app-id = "0x6e756e6368756b2d7369676e2d617070"
+version = "0.2.0"
+min-keyos-version = "1.4.0"
+
+[publisher]
+name = "Foundation Devices"
+contact-email = "hello@foundation.xyz"
+support-url = "https://foundation.xyz"
+
+[permissions]
+template = ["gui-app", "fs-generic", "navigable"]
+
+# Per-app device seed -> master key (src/master_key.rs).
+"os/security" = ["GetAppSeed"]
+
+"os/settings" = ["GetDeviceName", "GetLocale", "GetPrimeColor"]
+
+# Per-location access grants. `fs-generic` grants the file *operations*; these
+# grant the locations. The export file-picker can save the key/descriptor/signed
+# PSBT to Airlock, internal (User), or USB, and imports are read from any of
+# them, so read+write are needed on all three (else "AccessDenied").
+"os/fs" = [
+    "GetAirlockReadAccess",
+    "GetAirlockWriteAccess",
+    "GetUserReadAccess",
+    "GetUserWriteAccess",
+    "GetUsbReadAccess",
+    "GetUsbWriteAccess",
+]
+
+# NOTE: the custom USB CDC transport was removed. Under QuantumLink v2 the app
+# talks to the `os/ql` service rather than registering USB itself, so the old
+# `os/usbdev` grants are gone. When qlv2 ships in the SDK, add "ql-rpc" to the
+# template list and an "os/ql" grant block. See MIGRATION-QLV2.md.

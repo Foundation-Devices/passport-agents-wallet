@@ -3,39 +3,72 @@
 
 [package]
 name = "gui-app-nunchuk-signer"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Foundation Devices, Inc. <hello@foundation.xyz>"]
 license = "GPL-3.0-or-later"
 
-[dependencies]
-# KeyOS plumbing
-fs = { workspace = true }
-log = { workspace = true }
-log-server = { workspace = true }
-ngwallet = { workspace = true }
-security = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-server = { workspace = true }
-slint-keyos-platform = { path = "../../slint-keyos-platform/runtime" }
-usb = { workspace = true }
+# Standalone app: severed from any ancestor Cargo workspace, and the project-local
+# SDK mapping is excluded so cargo does not try to treat it as a member.
+[workspace]
+exclude = [".foundation-sdk"]
 
-# Cross-target utilities
+[dependencies]
+# --- Foundation SDK (KeyOS) -------------------------------------------------
+# Resolved through the project-local `.foundation-sdk/current` mapping so this
+# Cargo.toml stays machine-independent. Create it once with `./scripts/setup-sdk.sh`
+# (see SDK-SETUP.md). No KeyOS source checkout is required.
+fs = { path = ".foundation-sdk/current/lib/keyos/api/fs" }
+security = { path = ".foundation-sdk/current/lib/keyos/api/security" }
+settings = { path = ".foundation-sdk/current/lib/keyos/api/settings" }
+server = { path = ".foundation-sdk/current/lib/keyos/server" }
+slint-keyos-platform = { path = ".foundation-sdk/current/lib/keyos/slint-keyos-platform/runtime" }
+foundation-themes = { path = ".foundation-sdk/current/lib/keyos/sdk/crates/foundation-themes" }
+log-server = { package = "xous-api-log", path = ".foundation-sdk/current/lib/keyos/xous/api/log" }
+
+# --- Bitcoin core -----------------------------------------------------------
+# Descriptor/policy/PSBT/signing logic in src/nunchuk/ is built on ngwallet's
+# re-exported bitcoin + miniscript, so it compiles for BOTH the host simulator
+# and the armv7a-unknown-xous-elf device target. Public git dep: no KeyOS
+# workspace needed. (Same dependency the shipped Bitcoin app uses.)
+ngwallet = { git = "https://github.com/Foundation-Devices/ngwallet", tag = "3.8.0", features = ["rkyv", "sha2"] }
+
+# --- Cross-target utilities -------------------------------------------------
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 anyhow = "1"
 base64 = "0.22"
 hex = "0.4"
 
-# Descriptor/policy/PSBT/signing logic lives in src/nunchuk/, built on ngwallet's
-# bitcoin + miniscript so it compiles for BOTH the host simulator and the
-# armv7a-unknown-xous-elf device target. Mirrors the host-tested
-# `nunchuk-signer-core` reference crate.
-
-[target.'cfg(target_os = "xous")'.dependencies]
-xous = { path = "../../xous/xous-rs" }
+# NOTE: the USB CDC transport was removed in favour of QuantumLink v2 (os/ql),
+# which is not in the published SDK yet. Its `usb`, `server`-message and `xous`
+# plumbing went with it; see src/transport.rs and MIGRATION-QLV2.md.
 
 [build-dependencies]
-slint-keyos-platform-build = { path = "../../slint-keyos-platform/build", default-features = false }
+slint-keyos-platform-build = { path = ".foundation-sdk/current/lib/keyos/slint-keyos-platform/build", default-features = false }
+
+# Pin every Slint crate to the fork bundled with the SDK (lib/slint, 1.17.0).
+# Without this, cargo resolves Slint from crates.io and a second Slint ABI
+# enters the build alongside the SDK's.
+[patch.crates-io]
+slint = { path = ".foundation-sdk/current/lib/slint/api/rs/slint" }
+slint-build = { path = ".foundation-sdk/current/lib/slint/api/rs/build" }
+slint-macros = { path = ".foundation-sdk/current/lib/slint/api/rs/macros" }
+i-slint-common = { path = ".foundation-sdk/current/lib/slint/internal/common" }
+i-slint-compiler = { path = ".foundation-sdk/current/lib/slint/internal/compiler" }
+i-slint-core = { path = ".foundation-sdk/current/lib/slint/internal/core" }
+i-slint-core-macros = { path = ".foundation-sdk/current/lib/slint/internal/core-macros" }
+i-slint-backend-selector = { path = ".foundation-sdk/current/lib/slint/internal/backends/selector" }
+i-slint-renderer-software = { path = ".foundation-sdk/current/lib/slint/internal/renderers/software" }
+const-field-offset = { path = ".foundation-sdk/current/lib/slint/helper_crates/const-field-offset" }
+vtable = { path = ".foundation-sdk/current/lib/slint/helper_crates/vtable" }
+
+[profile.dev]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 3
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(keyos)'] }

@@ -1,0 +1,7 @@
+# Pin the ARM cross-toolchain for the device target. Without these, `cc` falls
+# back to Apple's /usr/bin/ar + ranlib, which silently write empty archive symbol
+# indexes for ELF objects and break linking much later (micro-ecc-sys et al).
+[env]
+CC_armv7a_unknown_xous_elf = "arm-none-eabi-gcc"
+AR_armv7a_unknown_xous_elf = "arm-none-eabi-ar"
+RANLIB_armv7a_unknown_xous_elf = "arm-none-eabi-ranlib"

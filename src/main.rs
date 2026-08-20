@@ -10,8 +10,9 @@
 
 mod nunchuk;
 mod master_key;
+mod theme;
 #[cfg(keyos)]
-mod usb_cdc;
+mod transport;
 
 use std::{
     io::Read,
@@ -176,6 +177,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     log::set_max_level(log::LevelFilter::Info);
     log::info!("Starting Nunchuk Signer");
 
+    // Apply the app theme (resources/theme.json) and track system light/dark.
+    theme::init(&ui);
+
     let secp = Secp256k1::new();
     let seed = match master_key::app_seed() {
         Ok(seed) => seed,
@@ -290,15 +294,17 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             let _ = hsm_poll_core(&state_poll);
         });
     }
-    // On device, the same requests arrive over USB-CDC instead of the file bridge.
+    // On device, the same requests arrive over the host transport instead of the
+    // file bridge. STUB: the QuantumLink v2 (os/ql) endpoint is not yet wired, so
+    // this currently no-ops. See src/transport.rs and MIGRATION-QLV2.md.
     #[cfg(keyos)]
     {
-        let state_usb = state.clone();
+        let state_transport = state.clone();
         std::thread::Builder::new()
-            .name("nunchuk-usb-cdc".into())
+            .name("nunchuk-transport".into())
             .spawn(move || {
-                if let Err(e) = usb_cdc::serve(state_usb) {
-                    log::error!("USB CDC transport exited: {e}");
+                if let Err(e) = transport::serve(state_transport) {
+                    log::error!("host transport exited: {e}");
                 }
             })
             .ok();

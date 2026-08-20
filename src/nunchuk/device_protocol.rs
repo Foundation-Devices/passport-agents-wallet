@@ -4,9 +4,11 @@
 //! device_protocol.rs - Prime's host<->device wire protocol.
 //!
 //! Newline-delimited JSON request/response, transport-agnostic. The SAME messages
-//! flow over the host file bridge (sim) and over USB-CDC (device, `transport/usb_cdc.rs`).
-//! The host-side `prime.py` HWI driver and `prime-signer` shim speak this protocol;
-//! the device dispatches it in `main.rs::process_request` against the live key + gate.
+//! flow over the host file bridge (sim) and over the device host transport
+//! (`src/transport.rs` - currently stubbed pending the QuantumLink v2 endpoint;
+//! see MIGRATION-QLV2.md). The host-side `prime.py` HWI driver and `prime-signer`
+//! shim speak this protocol; the device dispatches it in `main.rs::process_request`
+//! against the live key + gate.
 //!
 //! This maps onto HWI's `HardwareWalletClient`:
 //!   Fingerprint -> get_master_fingerprint
