@@ -117,7 +117,11 @@ impl SpendHistory {
 
     /// Total enforced outflow ever recorded (clock-free; powers the lifetime cap).
     pub fn total(&self) -> u64 {
-        self.records.iter().filter(|r| Self::enforced(r)).map(|r| r.amount_sats).sum()
+        self.records
+            .iter()
+            .filter(|r| Self::enforced(r))
+            .map(|r| r.amount_sats)
+            .sum()
     }
 
     /// Enforced outflow recorded in the current power-on session (clock-free;
@@ -174,7 +178,10 @@ impl SpendHistory {
             }
             records.push(r.clone());
         }
-        SpendHistory { records, session_start }
+        SpendHistory {
+            records,
+            session_start,
+        }
     }
 }
 
@@ -183,7 +190,15 @@ mod tests {
     use super::*;
 
     fn rec(t: u64, amt: u64, kind: SignKind) -> SpendRecord {
-        SpendRecord { unix_time: t, amount_sats: amt, dest: "tb1qdest".into(), kind, txid: format!("tx{t}"), wallet: String::new(), wallet_id: String::new() }
+        SpendRecord {
+            unix_time: t,
+            amount_sats: amt,
+            dest: "tb1qdest".into(),
+            kind,
+            txid: format!("tx{t}"),
+            wallet: String::new(),
+            wallet_id: String::new(),
+        }
     }
 
     #[test]
@@ -223,12 +238,20 @@ mod tests {
     fn unknown_clock_records_count_conservatively() {
         let mut h = SpendHistory::new();
         h.record(rec(0, 12_000, SignKind::Auto)); // clock unknown
-        // Even with a tiny window, the no-clock record is counted.
+                                                  // Even with a tiny window, the no-clock record is counted.
         assert_eq!(h.spent_in_window(1_000_000, 60), 12_000);
     }
 
     fn rec_w(t: u64, amt: u64, kind: SignKind, wid: &str) -> SpendRecord {
-        SpendRecord { unix_time: t, amount_sats: amt, dest: "d".into(), kind, txid: format!("tx{t}"), wallet: String::new(), wallet_id: wid.into() }
+        SpendRecord {
+            unix_time: t,
+            amount_sats: amt,
+            dest: "d".into(),
+            kind,
+            txid: format!("tx{t}"),
+            wallet: String::new(),
+            wallet_id: wid.into(),
+        }
     }
 
     // External (agent + Platform Key, self-reported) must NOT count toward the
@@ -240,7 +263,11 @@ mod tests {
         h.record(rec(200, 70_000, SignKind::External));
         assert_eq!(h.total(), 50_000, "External not counted in lifetime");
         // now=300 so both records (t=100, t=200) fall inside the window.
-        assert_eq!(h.spent_in_window(300, 604_800), 50_000, "External not in window");
+        assert_eq!(
+            h.spent_in_window(300, 604_800),
+            50_000,
+            "External not in window"
+        );
     }
 
     // Declined (the user said no) is audit-only: never in the enforcement caps.
@@ -262,7 +289,11 @@ mod tests {
         signed.txid = "tx1".into(); // same txid as the declined record
         h.record(signed);
         h.dedup_by_txid();
-        assert_eq!(h.len(), 2, "declined + approved with the same txid both survive");
+        assert_eq!(
+            h.len(),
+            2,
+            "declined + approved with the same txid both survive"
+        );
     }
 
     // Per-wallet view: only this wallet's records, with the session boundary
@@ -276,10 +307,18 @@ mod tests {
         h.record(rec_w(3, 5_000, SignKind::Auto, "A"));
         let a = h.for_wallet("A");
         assert_eq!(a.total(), 15_000, "both A records");
-        assert_eq!(a.spent_this_session(), 5_000, "only the post-session A record");
+        assert_eq!(
+            a.spent_this_session(),
+            5_000,
+            "only the post-session A record"
+        );
         let b = h.for_wallet("B");
         assert_eq!(b.total(), 20_000);
-        assert_eq!(b.spent_this_session(), 0, "B's only spend predates the session");
+        assert_eq!(
+            b.spent_this_session(),
+            0,
+            "B's only spend predates the session"
+        );
     }
 
     #[test]

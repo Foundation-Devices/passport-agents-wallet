@@ -18,7 +18,10 @@ use super::{Error, RegisteredPolicy, Result, SpendPathKind};
 pub enum SignDecision {
     /// Safe to sign. Carries the active path; Recovery requires explicit
     /// user confirmation in the UI before `sign_and_finalize` is called.
-    Allow { path: SpendPathKind, requires_confirmation: bool },
+    Allow {
+        path: SpendPathKind,
+        requires_confirmation: bool,
+    },
     /// Do not sign. Carries a user-facing reason.
     Refuse(String),
 }
@@ -36,7 +39,10 @@ pub fn decide(m: &MatchResult, _policy: &RegisteredPolicy) -> SignDecision {
     if !m.passport_can_sign {
         return SignDecision::Refuse("Passport owns no key on the active spend path.".into());
     }
-    SignDecision::Allow { path, requires_confirmation: matches!(path, SpendPathKind::Recovery) }
+    SignDecision::Allow {
+        path,
+        requires_confirmation: matches!(path, SpendPathKind::Recovery),
+    }
 }
 
 /// Sign every input we can with the device master key, WITHOUT finalizing.
@@ -56,7 +62,9 @@ pub fn sign(mut psbt: Psbt, master: &Xpriv, secp: &Secp256k1<All>) -> Result<Psb
 /// True if, after our signature, the PSBT can be finalized on its own (i.e.
 /// Passport is the only signer the active path needs). Used as a UI hint;
 /// never required for the coordinator workflow.
-pub fn is_finalizable(psbt: &Psbt, secp: &Secp256k1<All>) -> bool { psbt.clone().finalize(secp).is_ok() }
+pub fn is_finalizable(psbt: &Psbt, secp: &Secp256k1<All>) -> bool {
+    psbt.clone().finalize(secp).is_ok()
+}
 
 /// Sign every input we can with the device master key, then finalize.
 /// Returns the finalized PSBT (ready for Nunchuk to broadcast).
@@ -71,6 +79,7 @@ pub fn sign_and_finalize(mut psbt: Psbt, master: &Xpriv, secp: &Secp256k1<All>) 
         return Err(Error::Sign("device key produced no signatures".into()));
     }
 
-    psbt.finalize_mut(secp).map_err(|errs| Error::Sign(format!("finalize failed: {errs:?}")))?;
+    psbt.finalize_mut(secp)
+        .map_err(|errs| Error::Sign(format!("finalize failed: {errs:?}")))?;
     Ok(psbt)
 }

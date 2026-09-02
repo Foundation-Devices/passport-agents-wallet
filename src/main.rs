@@ -8,8 +8,8 @@
 //! branch, and signs only when the PSBT matches and Passport owns a key on
 //! that branch. All policy/PSBT/signing logic lives in `src/nunchuk`.
 
-mod nunchuk;
 mod master_key;
+mod nunchuk;
 mod theme;
 #[cfg(keyos)]
 mod transport;
@@ -24,8 +24,8 @@ use std::{
 use gui_permissions::GuiPermissions;
 // Bitcoin types used to build the demo wallet PSBT (+ test fixtures).
 use nunchuk::bitcoin::{
-    absolute::LockTime, psbt::Input, transaction::Version, Amount, OutPoint, PublicKey, ScriptBuf, Sequence,
-    Transaction, TxIn, TxOut, Txid, Witness,
+    absolute::LockTime, psbt::Input, transaction::Version, Amount, OutPoint, PublicKey, ScriptBuf,
+    Sequence, Transaction, TxIn, TxOut, Txid, Witness,
 };
 use nunchuk::{
     bitcoin::{
@@ -34,11 +34,11 @@ use nunchuk::{
         secp256k1::{All, Secp256k1},
         Address, Network,
     },
-    descriptor, device_protocol, gate, history, policy, psbt as lpsbt, signing, store, RegisteredPolicy,
-    SpendPathKind,
+    descriptor, device_protocol, gate, history, policy, psbt as lpsbt, signing, store,
+    RegisteredPolicy, SpendPathKind,
 };
 use slint_keyos_platform::{
-    app,
+    app_ui2,
     gui_server_api::navigation::{
         filepicker::{AllowedLocations, Location as PickLocation, SelectFileOptions},
         qrscanner::{ScanQrOptions, ScanQrResult},
@@ -48,7 +48,8 @@ use slint_keyos_platform::{
     spawn_local, spawn_worker,
 };
 
-app!("Nunchuk");
+app_ui2!("Agents Wallet");
+include!(concat!(env!("OUT_DIR"), "/tr.rs"));
 
 const DEFAULT_NETWORK: Network = Network::Testnet;
 const MAINNET_ACCOUNT_PATH: &str = "m/48'/0'/0'/2'";
@@ -140,7 +141,10 @@ impl AppState {
     /// global default. Returns an owned clone so callers can read it while the
     /// ledger is mutated for the same wallet.
     fn policy_for(&self, checksum: &str) -> gate::SpendPolicy {
-        self.wallet_policies.get(checksum).cloned().unwrap_or_else(|| self.spend_policy.clone())
+        self.wallet_policies
+            .get(checksum)
+            .cloned()
+            .unwrap_or_else(|| self.spend_policy.clone())
     }
 }
 
@@ -177,6 +181,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     log::set_max_level(log::LevelFilter::Info);
     log::info!("Starting Nunchuk Signer");
 
+    init_tr!(ui);
+    ui.global::<Utils>()
+        .on_qrcode(slint_keyos_platform::qrcode::render);
     // Apply the app theme (resources/theme.json) and track system light/dark.
     theme::init(&ui);
 
@@ -228,7 +235,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 // so `prime-signer sign --psbt $(cat demo-unsigned.b64.txt)` can drive
                 // the live shim->poller loop without being deduped.
                 if let Ok(demo2) = build_demo_psbt(&seed, &secp, fp, &reg, 60_000) {
-                    write_bridge_file(&data_dir, "demo-unsigned.b64.txt", psbt_base64(&demo2).as_bytes());
+                    write_bridge_file(
+                        &data_dir,
+                        "demo-unsigned.b64.txt",
+                        psbt_base64(&demo2).as_bytes(),
+                    );
                 }
                 let _ = policies.add(reg);
             }
@@ -236,11 +247,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     }
     let (mut history, hist_unsafe) = load_history(&data_dir);
     history.dedup_by_txid(); // clean any stale duplicate rows from older builds
-    // NOTE: we deliberately do NOT begin_session() on every boot. The session
-    // budget is now persisted (session_start lives in history.json), so a host
-    // that controls USB power can't reset the budget by power-cycling the device.
-    // The user resets it explicitly via "Reset budget" on the Policy screen.
-    // First run (no persisted session_start) starts at 0, which is correct.
+                             // NOTE: we deliberately do NOT begin_session() on every boot. The session
+                             // budget is now persisted (session_start lives in history.json), so a host
+                             // that controls USB power can't reset the budget by power-cycling the device.
+                             // The user resets it explicitly via "Reset budget" on the Policy screen.
+                             // First run (no persisted session_start) starts at 0, which is correct.
 
     let (wallet_policies, wp_unsafe) = load_wallet_policies(&data_dir);
 
@@ -347,10 +358,15 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     {
         let state = state.clone();
         let weak = ui.as_weak();
-        ui.global::<Callbacks>().on_set_xpub_network(move |network| {
-            let Some(ui) = weak.upgrade() else { return };
-            set_xpub_export(&ui, &state, network_from_label(network.as_str()).unwrap_or(DEFAULT_NETWORK));
-        });
+        ui.global::<Callbacks>()
+            .on_set_xpub_network(move |network| {
+                let Some(ui) = weak.upgrade() else { return };
+                set_xpub_export(
+                    &ui,
+                    &state,
+                    network_from_label(network.as_str()).unwrap_or(DEFAULT_NETWORK),
+                );
+            });
     }
 
     // -- export key to a chosen location via the file picker ----------------
@@ -361,7 +377,8 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             let Some(ui) = weak.upgrade() else { return };
             let key = {
                 let st = state.lock().unwrap();
-                key_with_origin(&st.seed, &st.secp, st.fp, st.xpub_network).unwrap_or_else(|_| String::new())
+                key_with_origin(&st.seed, &st.secp, st.fp, st.xpub_network)
+                    .unwrap_or_else(|_| String::new())
             };
             let cb = ui.global::<Callbacks>();
             cb.set_export_ok(false);
@@ -374,15 +391,23 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                     cb.set_export_error("".into());
                     cb.set_export_done_title(tr::lookup_id(TrId::ExportKeySavedTitle).into());
                     cb.set_export_done_detail(
-                        format!("{}\n{}", format_saved_to(&dest), tr::lookup_id(TrId::ExportKeySavedDetail))
-                            .into(),
+                        format!(
+                            "{}\n{}",
+                            format_saved_to(&dest),
+                            tr::lookup_id(TrId::ExportKeySavedDetail)
+                        )
+                        .into(),
                     );
                     cb.set_export_ok(true);
                 }
                 Err(e) => {
                     let msg = format!("{e}");
                     // A user cancel is not an error to surface.
-                    cb.set_export_error(if msg.contains("cancelled") { "".into() } else { msg.into() });
+                    cb.set_export_error(if msg.contains("cancelled") {
+                        "".into()
+                    } else {
+                        msg.into()
+                    });
                 }
             }
         });
@@ -416,7 +441,10 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                     Ok(p) => p,
                     Err(e) => {
                         let err = format!("{e}");
-                        review_message(&ui, &trfmt(TrId::ErrorReadNamedFile, &[UNSIGNED_PSBT_FILE, &err]));
+                        review_message(
+                            &ui,
+                            &trfmt(TrId::ErrorReadNamedFile, &[UNSIGNED_PSBT_FILE, &err]),
+                        );
                         ui.global::<Callbacks>().set_review_ready(true);
                         return;
                     }
@@ -486,16 +514,27 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                             auto_sign_pending(
                                 &ui,
                                 &state2,
-                                Pending { psbt, policy: reg, matched: m, outflow },
+                                Pending {
+                                    psbt,
+                                    policy: reg,
+                                    matched: m,
+                                    outflow,
+                                },
                             );
                         } else {
-                            state2.lock().unwrap().pending =
-                                Some(Pending { psbt, policy: reg, matched: m, outflow });
+                            state2.lock().unwrap().pending = Some(Pending {
+                                psbt,
+                                policy: reg,
+                                matched: m,
+                                outflow,
+                            });
                             set_status(&ui, tr::lookup_id(TrId::StatusLoadedPsbt));
                         }
                     }
                     Ok(None) => review_message(&ui, tr::lookup_id(TrId::ReviewNoMatch)),
-                    Err(e) => review_message(&ui, &trfmt(TrId::ErrorMatchFailed, &[&format!("{e}")])),
+                    Err(e) => {
+                        review_message(&ui, &trfmt(TrId::ErrorMatchFailed, &[&format!("{e}")]))
+                    }
                 }
                 ui.global::<Callbacks>().set_psbt_loading(false);
             })
@@ -563,7 +602,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                         _ => tr::lookup_id(TrId::VerifyReceiveKind).to_string(),
                     };
                     cb.set_verify_detail(
-                        trfmt(TrId::VerifySuccessDetail, &[name, &kind, &index.to_string()]).into(),
+                        trfmt(
+                            TrId::VerifySuccessDetail,
+                            &[name, &kind, &index.to_string()],
+                        )
+                        .into(),
                     );
                 }
                 None => {
@@ -647,7 +690,15 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 // Mark in-flight so a host re-sending this PSBT mid-sign doesn't queue
                 // a duplicate approval (the signature isn't cached until we finish).
                 st.signing_in_flight.insert(txid.clone());
-                (pending.psbt, master, pending.outflow, txid, dest, wallet, wallet_id)
+                (
+                    pending.psbt,
+                    master,
+                    pending.outflow,
+                    txid,
+                    dest,
+                    wallet,
+                    wallet_id,
+                )
             };
             let (psbt, master, outflow, txid, dest, wallet, wallet_id) = prepared;
             let weak2 = ui.as_weak();
@@ -658,7 +709,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 let signed: Result<Vec<u8>, String> = spawn_worker(async move {
                     // Reuse the process-wide secp context (building the full
                     // sign+verify tables costs ~tens of ms; do it once, not per sign).
-                    signing::sign(psbt, &master, shared_secp()).map(|p| p.serialize()).map_err(|e| format!("{e}"))
+                    signing::sign(psbt, &master, shared_secp())
+                        .map(|p| p.serialize())
+                        .map_err(|e| format!("{e}"))
                 })
                 .await;
                 let Some(ui) = weak2.upgrade() else {
@@ -726,8 +779,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 match read_text_path_limited(&bridge, MAX_DESCRIPTOR_BYTES, "descriptor") {
                     Ok(t) => t,
                     Err(e) => {
-                        ui.global::<Callbacks>()
-                            .set_import_error(trfmt(TrId::ErrorReadFile, &[&format!("{e}")]).into());
+                        ui.global::<Callbacks>().set_import_error(
+                            trfmt(TrId::ErrorReadFile, &[&format!("{e}")]).into(),
+                        );
                         return;
                     }
                 }
@@ -751,8 +805,15 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 let mut st = state.lock().unwrap();
                 match register_descriptor(&text, st.fp, &st.seed, &st.secp) {
                     Ok(reg) => {
-                        if st.policies.find_by_checksum(&reg.descriptor_checksum).is_some() {
-                            Err(trfmt(TrId::ImportErrorDuplicate, &[&reg.descriptor_checksum]))
+                        if st
+                            .policies
+                            .find_by_checksum(&reg.descriptor_checksum)
+                            .is_some()
+                        {
+                            Err(trfmt(
+                                TrId::ImportErrorDuplicate,
+                                &[&reg.descriptor_checksum],
+                            ))
                         } else {
                             st.pending_import = Some(reg.clone());
                             Ok(reg)
@@ -786,7 +847,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         ui.global::<Callbacks>().on_confirm_import(move || {
             let Some(ui) = weak.upgrade() else { return };
             // Apply the user-chosen name (fall back to the default if blank).
-            let chosen = ui.global::<Callbacks>().get_import_name().trim().to_string();
+            let chosen = ui
+                .global::<Callbacks>()
+                .get_import_name()
+                .trim()
+                .to_string();
             let result = {
                 let mut st = state.lock().unwrap();
                 match st.pending_import.take() {
@@ -795,9 +860,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                             reg.name = chosen;
                         }
                         match save_policy(&st.data_dir, &reg) {
-                            Ok(()) => {
-                                st.policies.add(reg.clone()).map(|_| reg).map_err(|e| anyhow::anyhow!("{e}"))
-                            }
+                            Ok(()) => st
+                                .policies
+                                .add(reg.clone())
+                                .map(|_| reg)
+                                .map_err(|e| anyhow::anyhow!("{e}")),
                             Err(e) => {
                                 st.pending_import = Some(reg);
                                 Err(e)
@@ -962,7 +1029,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 match st.policies.find_by_checksum(id.as_str()) {
                     Some(reg) => {
                         let filename = format!("nunchuk-descriptor-{id}.txt");
-                        (reg.descriptor.clone(), st.data_dir.join(&filename), filename)
+                        (
+                            reg.descriptor.clone(),
+                            st.data_dir.join(&filename),
+                            filename,
+                        )
                     }
                     None => {
                         set_status(&ui, tr::lookup_id(TrId::ErrorPolicyNotFound));
@@ -978,7 +1049,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             match export_via_picker(&filename, descriptor.as_bytes()) {
                 Ok(dest) => {
                     cb.set_export_error("".into());
-                    cb.set_export_done_title(tr::lookup_id(TrId::ExportDescriptorSavedTitle).into());
+                    cb.set_export_done_title(
+                        tr::lookup_id(TrId::ExportDescriptorSavedTitle).into(),
+                    );
                     cb.set_export_done_detail(
                         format!(
                             "{}\n{}",
@@ -991,7 +1064,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 }
                 Err(e) => {
                     let msg = format!("{e}");
-                    cb.set_export_error(if msg.contains("cancelled") { "".into() } else { msg.into() });
+                    cb.set_export_error(if msg.contains("cancelled") {
+                        "".into()
+                    } else {
+                        msg.into()
+                    });
                 }
             }
         });
@@ -1048,13 +1125,14 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     // number. Routed through a callback so the stepper / presets share one path.
     {
         let weak = ui.as_weak();
-        ui.global::<Callbacks>().on_set_setup_recovery_blocks(move |n| {
-            let Some(ui) = weak.upgrade() else { return };
-            let blocks = (n.max(1) as u32).min(RECOVERY_BLOCKS_MAX);
-            let cb = ui.global::<Callbacks>();
-            cb.set_setup_recovery_blocks(blocks as i32);
-            cb.set_setup_recovery_summary(recovery_summary(blocks).into());
-        });
+        ui.global::<Callbacks>()
+            .on_set_setup_recovery_blocks(move |n| {
+                let Some(ui) = weak.upgrade() else { return };
+                let blocks = (n.max(1) as u32).min(RECOVERY_BLOCKS_MAX);
+                let cb = ui.global::<Callbacks>();
+                cb.set_setup_recovery_blocks(blocks as i32);
+                cb.set_setup_recovery_summary(recovery_summary(blocks).into());
+            });
     }
     // Enter the guided 2-of-3 flow (Nunchuk Platform Key + Prime).
     {
@@ -1075,10 +1153,18 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             let active_id = ui.global::<Callbacks>().get_detail_id().to_string();
             {
                 let mut st = state.lock().unwrap();
-                apply_policy_edit(&mut st, &active_id, |p| p.per_tx_limit_sats = n.max(0) as u64);
+                apply_policy_edit(&mut st, &active_id, |p| {
+                    p.per_tx_limit_sats = n.max(0) as u64
+                });
             }
             refresh_home(&ui, &state);
-            set_status(&ui, &format!("Per-transaction limit set to {} sats", commas(n.max(0) as u64)));
+            set_status(
+                &ui,
+                &format!(
+                    "Per-transaction limit set to {} sats",
+                    commas(n.max(0) as u64)
+                ),
+            );
         });
     }
     {
@@ -1094,7 +1180,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 });
             }
             refresh_home(&ui, &state);
-            let msg = if n <= 0 { "Daily cap turned off".to_string() } else { format!("Daily cap set to {} sats", commas(n as u64)) };
+            let msg = if n <= 0 {
+                "Daily cap turned off".to_string()
+            } else {
+                format!("Daily cap set to {} sats", commas(n as u64))
+            };
             set_status(&ui, &msg);
         });
     }
@@ -1102,33 +1192,38 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     {
         let state = state.clone();
         let weak = ui.as_weak();
-        ui.global::<Callbacks>().on_set_custom_limit(move |target, s| {
-            let Some(ui) = weak.upgrade() else { return };
-            // The keypad emits a plain string; tolerate grouping commas/whitespace.
-            let parsed: u64 = s.trim().replace(',', "").parse().unwrap_or(0);
-            let active_id = ui.global::<Callbacks>().get_detail_id().to_string();
-            let msg = {
-                let mut st = state.lock().unwrap();
-                let m = match target.as_str() {
-                    "pertx" => {
-                        let v = parsed.max(1).min(2_000_000_000);
-                        apply_policy_edit(&mut st, &active_id, |p| p.per_tx_limit_sats = v);
-                        format!("Per-transaction limit set to {} sats", commas(v))
-                    }
-                    "daily" => {
-                        let v = parsed.min(2_000_000_000);
-                        apply_policy_edit(&mut st, &active_id, |p| {
-                            p.daily_cap_sats = if v == 0 { None } else { Some(v) };
-                        });
-                        if v == 0 { "Daily cap turned off".to_string() } else { format!("Daily cap set to {} sats", commas(v)) }
-                    }
-                    _ => return,
+        ui.global::<Callbacks>()
+            .on_set_custom_limit(move |target, s| {
+                let Some(ui) = weak.upgrade() else { return };
+                // The keypad emits a plain string; tolerate grouping commas/whitespace.
+                let parsed: u64 = s.trim().replace(',', "").parse().unwrap_or(0);
+                let active_id = ui.global::<Callbacks>().get_detail_id().to_string();
+                let msg = {
+                    let mut st = state.lock().unwrap();
+                    let m = match target.as_str() {
+                        "pertx" => {
+                            let v = parsed.max(1).min(2_000_000_000);
+                            apply_policy_edit(&mut st, &active_id, |p| p.per_tx_limit_sats = v);
+                            format!("Per-transaction limit set to {} sats", commas(v))
+                        }
+                        "daily" => {
+                            let v = parsed.min(2_000_000_000);
+                            apply_policy_edit(&mut st, &active_id, |p| {
+                                p.daily_cap_sats = if v == 0 { None } else { Some(v) };
+                            });
+                            if v == 0 {
+                                "Daily cap turned off".to_string()
+                            } else {
+                                format!("Daily cap set to {} sats", commas(v))
+                            }
+                        }
+                        _ => return,
+                    };
+                    m
                 };
-                m
-            };
-            refresh_home(&ui, &state);
-            set_status(&ui, &msg);
-        });
+                refresh_home(&ui, &state);
+                set_status(&ui, &msg);
+            });
     }
     // -- freeze auto-signing (user kill-switch) -------------------------------
     {
@@ -1142,7 +1237,14 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 apply_policy_edit(&mut st, &active_id, |p| p.frozen = frozen);
             }
             refresh_home(&ui, &state);
-            set_status(&ui, if frozen { "Auto-signing frozen. Every spend now needs your approval." } else { "Auto-signing resumed (within your limits)." });
+            set_status(
+                &ui,
+                if frozen {
+                    "Auto-signing frozen. Every spend now needs your approval."
+                } else {
+                    "Auto-signing resumed (within your limits)."
+                },
+            );
         });
     }
     // -- reset spend budget + clear a fail-closed pause -----------------------
@@ -1162,7 +1264,10 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 let _ = save_spend_policy(&st.data_dir, &st.spend_policy);
             }
             refresh_home(&ui, &state);
-            set_status(&ui, "Spend budget reset. Auto-signing resumed within your limits.");
+            set_status(
+                &ui,
+                "Spend budget reset. Auto-signing resumed within your limits.",
+            );
         });
     }
     // -- destination allowlist: add (scan QR) / remove ------------------------
@@ -1171,7 +1276,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         let weak = ui.as_weak();
         ui.global::<Callbacks>().on_add_allowlist_address(move || {
             let Some(ui) = weak.upgrade() else { return };
-            let Some(scanned) = scan_address_qr() else { return };
+            let Some(scanned) = scan_address_qr() else {
+                return;
+            };
             let addr = normalize_address(&scanned);
             if addr.is_empty() {
                 set_status(&ui, "Couldn't read an address from that QR.");
@@ -1194,19 +1301,20 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     {
         let state = state.clone();
         let weak = ui.as_weak();
-        ui.global::<Callbacks>().on_remove_allowlist_address(move |addr| {
-            let Some(ui) = weak.upgrade() else { return };
-            let active_id = ui.global::<Callbacks>().get_detail_id().to_string();
-            {
-                let mut st = state.lock().unwrap();
-                let a = addr.to_string();
-                apply_policy_edit(&mut st, &active_id, move |p| {
-                    p.allowlist.retain(|x| !x.eq_ignore_ascii_case(&a));
-                });
-            }
-            refresh_home(&ui, &state);
-            set_status(&ui, "Removed from the allowlist.");
-        });
+        ui.global::<Callbacks>()
+            .on_remove_allowlist_address(move |addr| {
+                let Some(ui) = weak.upgrade() else { return };
+                let active_id = ui.global::<Callbacks>().get_detail_id().to_string();
+                {
+                    let mut st = state.lock().unwrap();
+                    let a = addr.to_string();
+                    apply_policy_edit(&mut st, &active_id, move |p| {
+                        p.allowlist.retain(|x| !x.eq_ignore_ascii_case(&a));
+                    });
+                }
+                refresh_home(&ui, &state);
+                set_status(&ui, "Removed from the allowlist.");
+            });
     }
 
     // -- HSM mode: poll the host bridge + auto-sign in-policy PSBTs unattended -
@@ -1289,10 +1397,19 @@ fn remove_bridge_file(_dir: &Path, _name: &str) {}
 /// Outcome of the shared sign path (used by both the file bridge and USB-CDC).
 #[allow(dead_code)]
 enum SignResult {
-    Signed { bytes: Vec<u8>, outflow: u64, txid: String },
+    Signed {
+        bytes: Vec<u8>,
+        outflow: u64,
+        txid: String,
+    },
     /// Over-policy or recovery: held for an on-device approval.
-    Pending { reason: String, recovery: bool },
-    Refused { reason: String },
+    Pending {
+        reason: String,
+        recovery: bool,
+    },
+    Refused {
+        reason: String,
+    },
 }
 
 /// THE one place a host-submitted PSBT is gated + signed. Matches the registered
@@ -1317,10 +1434,16 @@ fn sign_within_policy(st: &mut AppState, psbt: Psbt) -> SignResult {
     let fp = st.fp;
     let (reg, m) = match lpsbt::match_against_all(&psbt, &policies, fp, GAP) {
         Ok(Some((reg, m))) => (reg.clone(), m),
-        _ => return SignResult::Refused { reason: "does not match a registered wallet".into() },
+        _ => {
+            return SignResult::Refused {
+                reason: "does not match a registered wallet".into(),
+            }
+        }
     };
     if !m.matched || !m.passport_can_sign {
-        return SignResult::Refused { reason: "Passport owns no key on this PSBT's spend path".into() };
+        return SignResult::Refused {
+            reason: "Passport owns no key on this PSBT's spend path".into(),
+        };
     }
     let txid = psbt.unsigned_tx.compute_txid().to_string();
     let outflow = lpsbt::outflow_sats(&psbt, &reg, GAP).unwrap_or(0);
@@ -1377,17 +1500,32 @@ fn sign_within_policy(st: &mut AppState, psbt: Psbt) -> SignResult {
         // last two, a host re-sending mid-/post-sign would surface a phantom approval.
         let queued = st.signing_in_flight.contains(&txid)
             || st.signed_cache.contains_key(&txid)
-            || st.pending.as_ref().is_some_and(|p| p.psbt.unsigned_tx.compute_txid().to_string() == txid)
-            || st.pending_queue.iter().any(|p| p.psbt.unsigned_tx.compute_txid().to_string() == txid);
+            || st
+                .pending
+                .as_ref()
+                .is_some_and(|p| p.psbt.unsigned_tx.compute_txid().to_string() == txid)
+            || st
+                .pending_queue
+                .iter()
+                .any(|p| p.psbt.unsigned_tx.compute_txid().to_string() == txid);
         if !queued {
-            st.pending_queue.push_back(Pending { psbt, policy: reg, matched: m, outflow });
+            st.pending_queue.push_back(Pending {
+                psbt,
+                policy: reg,
+                matched: m,
+                outflow,
+            });
             st.usb_sign_pending = true;
         }
         return SignResult::Pending { reason, recovery };
     }
     let master = match master_for_network(&st.seed, network) {
         Ok(m) => m,
-        Err(e) => return SignResult::Refused { reason: format!("{e}") },
+        Err(e) => {
+            return SignResult::Refused {
+                reason: format!("{e}"),
+            }
+        }
     };
     let dest = primary_dest(&psbt, &reg);
     match signing::sign(psbt, &master, &st.secp) {
@@ -1410,13 +1548,22 @@ fn sign_within_policy(st: &mut AppState, psbt: Psbt) -> SignResult {
                 st.history.records.pop();
                 st.safe_mode = true;
                 st.safe_mode_reason =
-                    "Couldn't record the last spend to the ledger; auto-signing is paused.".to_string();
-                return SignResult::Refused { reason: format!("ledger write failed, signature withheld: {e}") };
+                    "Couldn't record the last spend to the ledger; auto-signing is paused."
+                        .to_string();
+                return SignResult::Refused {
+                    reason: format!("ledger write failed, signature withheld: {e}"),
+                };
             }
             st.last_signed = Some(bytes.clone());
-            SignResult::Signed { bytes, outflow, txid }
+            SignResult::Signed {
+                bytes,
+                outflow,
+                txid,
+            }
         }
-        Err(e) => SignResult::Refused { reason: format!("{e}") },
+        Err(e) => SignResult::Refused {
+            reason: format!("{e}"),
+        },
     }
 }
 
@@ -1430,22 +1577,37 @@ fn bytes_base64(bytes: &[u8]) -> String {
 fn address_at(reg: &RegisteredPolicy, index: u32, change: bool) -> anyhow::Result<String> {
     let network = network_from_policy(reg).unwrap_or(DEFAULT_NETWORK);
     let parsed = descriptor::import(&reg.descriptor).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let singles = parsed.descriptor.into_single_descriptors().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let singles = parsed
+        .descriptor
+        .into_single_descriptors()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let si = if change { 1 } else { 0 };
-    let single = singles.get(si).ok_or_else(|| anyhow::anyhow!("descriptor has no path {si}"))?;
-    let def = single.at_derivation_index(index).map_err(|e| anyhow::anyhow!("{e}"))?;
-    Ok(def.address(network).map_err(|e| anyhow::anyhow!("{e}"))?.to_string())
+    let single = singles
+        .get(si)
+        .ok_or_else(|| anyhow::anyhow!("descriptor has no path {si}"))?;
+    let def = single
+        .at_derivation_index(index)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(def
+        .address(network)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .to_string())
 }
 
 /// Dispatch one device-protocol request against the live key + gate. The transport
 /// (USB-CDC on device, or a test) parses JSON -> Request, calls this, serializes the
 /// Response. Same handler regardless of transport.
 #[allow(dead_code)] // USB-CDC transport entry point (cfg keyos) + tests
-fn process_request(state: &Arc<Mutex<AppState>>, req: device_protocol::Request) -> device_protocol::Response {
+fn process_request(
+    state: &Arc<Mutex<AppState>>,
+    req: device_protocol::Request,
+) -> device_protocol::Response {
     use device_protocol::{Request, Response};
     let mut st = state.lock().unwrap();
     match req {
-        Request::Fingerprint => Response::Fingerprint { fingerprint: st.fp.to_string() },
+        Request::Fingerprint => Response::Fingerprint {
+            fingerprint: st.fp.to_string(),
+        },
         Request::Xpub { path } => {
             if !is_allowed_xpub_path(&path) {
                 return Response::error(
@@ -1463,13 +1625,17 @@ fn process_request(state: &Arc<Mutex<AppState>>, req: device_protocol::Request) 
                 // Already signed (auto, or approved on-device): return it idempotently,
                 // no re-sign and no duplicate activity row.
                 if let Some(bytes) = st.signed_cache.get(&txid) {
-                    Response::Signed { psbt: bytes_base64(bytes) }
+                    Response::Signed {
+                        psbt: bytes_base64(bytes),
+                    }
                 } else {
                     match sign_within_policy(&mut st, p) {
                         SignResult::Signed { bytes, txid, .. } => {
                             st.cache_signed(txid, bytes.clone());
                             st.needs_refresh = true; // activity log changed -> redraw home
-                            Response::Signed { psbt: bytes_base64(&bytes) }
+                            Response::Signed {
+                                psbt: bytes_base64(&bytes),
+                            }
                         }
                         // Over-policy / recovery: sign_within_policy queued it for an
                         // on-device tap; the poll timer surfaces the approval screen.
@@ -1489,34 +1655,49 @@ fn process_request(state: &Arc<Mutex<AppState>>, req: device_protocol::Request) 
                 None => Response::error("no wallet registered"),
             }
         }
-        Request::Register { descriptor } => match register_descriptor(&descriptor, st.fp, &st.seed, &st.secp) {
-            Ok(reg) => {
-                // Already enrolled (a prior push was approved on-device) -> done.
-                if st.policies.find_by_checksum(&reg.descriptor_checksum).is_some() {
-                    Response::Registered {
-                        name: reg.name.clone(),
-                        checksum: reg.descriptor_checksum,
+        Request::Register { descriptor } => {
+            match register_descriptor(&descriptor, st.fp, &st.seed, &st.secp) {
+                Ok(reg) => {
+                    // Already enrolled (a prior push was approved on-device) -> done.
+                    if st
+                        .policies
+                        .find_by_checksum(&reg.descriptor_checksum)
+                        .is_some()
+                    {
+                        Response::Registered {
+                            name: reg.name.clone(),
+                            checksum: reg.descriptor_checksum,
+                        }
+                    } else if st
+                        .pending_import
+                        .as_ref()
+                        .is_some_and(|p| p.descriptor_checksum == reg.descriptor_checksum)
+                    {
+                        // Staged and waiting for the tap; have the host poll again.
+                        Response::Pending {
+                            reason: "awaiting on-device approval".into(),
+                        }
+                    } else {
+                        // Stage it and raise the approval screen. Enrolment only happens on
+                        // an on-device tap (the host retries register until Registered).
+                        st.pending_import = Some(reg);
+                        st.usb_register_pending = true;
+                        Response::Pending {
+                            reason: "review + approve on Passport".into(),
+                        }
                     }
-                } else if st
-                    .pending_import
-                    .as_ref()
-                    .is_some_and(|p| p.descriptor_checksum == reg.descriptor_checksum)
-                {
-                    // Staged and waiting for the tap; have the host poll again.
-                    Response::Pending { reason: "awaiting on-device approval".into() }
-                } else {
-                    // Stage it and raise the approval screen. Enrolment only happens on
-                    // an on-device tap (the host retries register until Registered).
-                    st.pending_import = Some(reg);
-                    st.usb_register_pending = true;
-                    Response::Pending { reason: "review + approve on Passport".into() }
                 }
+                Err(e) => Response::error(format!("{e}")),
             }
-            Err(e) => Response::error(format!("{e}")),
-        },
+        }
         // Agent reports a spend it signed with the Platform Key (Prime not involved).
         // Record it once (dedupe by txid) as the "without you" lane in the ledger.
-        Request::Log { amount_sats, dest, txid, wallet } => {
+        Request::Log {
+            amount_sats,
+            dest,
+            txid,
+            wallet,
+        } => {
             let already = st.history.has_txid(&txid);
             if !already {
                 st.history.record(history::SpendRecord {
@@ -1539,7 +1720,11 @@ fn process_request(state: &Arc<Mutex<AppState>>, req: device_protocol::Request) 
         // begin_wallet_setup writes both into spend_policy before the wait step, so
         // the agent reads the picker's value here instead of being told it.
         Request::Spec => Response::Spec {
-            model: if st.spend_policy.with_platform_key { "2-of-3".into() } else { "2-of-2".into() },
+            model: if st.spend_policy.with_platform_key {
+                "2-of-3".into()
+            } else {
+                "2-of-2".into()
+            },
             recovery_blocks: st.spend_policy.recovery_blocks,
         },
     }
@@ -1560,7 +1745,11 @@ fn hsm_poll_core(state: &Arc<Mutex<AppState>>) -> Option<(HsmOutcome, u64)> {
                         write_bridge_file(&st.data_dir, "xpub-response.txt", key.as_bytes());
                     }
                 } else {
-                    write_bridge_file(&st.data_dir, "xpub-response.txt", b"error: xpub path not allowed");
+                    write_bridge_file(
+                        &st.data_dir,
+                        "xpub-response.txt",
+                        b"error: xpub path not allowed",
+                    );
                 }
             }
             remove_bridge_file(&st.data_dir, "xpub-request.txt");
@@ -1569,17 +1758,29 @@ fn hsm_poll_core(state: &Arc<Mutex<AppState>>) -> Option<(HsmOutcome, u64)> {
         if !st.spend_policy.hsm_enabled || st.policies.is_empty() {
             return None;
         }
-        let Some(bridge) = sim_bridge_file(&st.data_dir, UNSIGNED_PSBT_FILE) else { return None };
-        let Ok(psbt) = read_psbt_file(&bridge) else { return None };
+        let Some(bridge) = sim_bridge_file(&st.data_dir, UNSIGNED_PSBT_FILE) else {
+            return None;
+        };
+        let Ok(psbt) = read_psbt_file(&bridge) else {
+            return None;
+        };
         let txid = psbt.unsigned_tx.compute_txid().to_string();
         if st.last_hsm_txid.as_deref() == Some(txid.as_str()) {
             return None; // already handled
         }
         // Same gated sign path the USB transport uses.
         match sign_within_policy(&mut st, psbt) {
-            SignResult::Signed { bytes, outflow, txid } => {
+            SignResult::Signed {
+                bytes,
+                outflow,
+                txid,
+            } => {
                 write_bridge_file(&st.data_dir, SIGNED_PSBT_FILE, &bytes);
-                write_bridge_file(&st.data_dir, "signed-psbt.b64.txt", bytes_base64(&bytes).as_bytes());
+                write_bridge_file(
+                    &st.data_dir,
+                    "signed-psbt.b64.txt",
+                    bytes_base64(&bytes).as_bytes(),
+                );
                 remove_bridge_file(&st.data_dir, UNSIGNED_PSBT_FILE);
                 log::info!("HSM auto-signed {outflow} sats (txid {txid})");
                 st.last_hsm_txid = Some(txid);
@@ -1587,7 +1788,14 @@ fn hsm_poll_core(state: &Arc<Mutex<AppState>>) -> Option<(HsmOutcome, u64)> {
             }
             SignResult::Pending { recovery, .. } => {
                 st.last_hsm_txid = Some(txid);
-                Some((if recovery { HsmOutcome::Recovery } else { HsmOutcome::NeedsApproval }, 0))
+                Some((
+                    if recovery {
+                        HsmOutcome::Recovery
+                    } else {
+                        HsmOutcome::NeedsApproval
+                    },
+                    0,
+                ))
             }
             SignResult::Refused { .. } => {
                 st.last_hsm_txid = Some(txid);
@@ -1601,8 +1809,12 @@ fn hsm_poll_core(state: &Arc<Mutex<AppState>>) -> Option<(HsmOutcome, u64)> {
 fn hsm_poll(ui: &AppWindow, state: &Arc<Mutex<AppState>>) {
     if let Some((outcome, amount)) = hsm_poll_core(state) {
         match outcome {
-            HsmOutcome::Signed => set_status(ui, &format!("HSM auto-signed {} sats", commas(amount))),
-            HsmOutcome::NeedsApproval => set_status(ui, "Spend over policy: tap Sign PSBT to approve"),
+            HsmOutcome::Signed => {
+                set_status(ui, &format!("HSM auto-signed {} sats", commas(amount)))
+            }
+            HsmOutcome::NeedsApproval => {
+                set_status(ui, "Spend over policy: tap Sign PSBT to approve")
+            }
             HsmOutcome::Recovery => set_status(ui, "Recovery spend: tap Sign PSBT to approve"),
         }
         refresh_home(ui, state);
@@ -1639,7 +1851,10 @@ fn apply_policy_edit(st: &mut AppState, active_id: &str, f: impl FnOnce(&mut gat
     if !active_id.is_empty() && st.policies.find_by_checksum(active_id).is_some() {
         let default = st.spend_policy.clone();
         {
-            let p = st.wallet_policies.entry(active_id.to_string()).or_insert(default);
+            let p = st
+                .wallet_policies
+                .entry(active_id.to_string())
+                .or_insert(default);
             f(p);
         }
         let _ = save_wallet_policies(&st.data_dir, &st.wallet_policies);
@@ -1654,7 +1869,9 @@ fn apply_policy_edit(st: &mut AppState, active_id: &str, f: impl FnOnce(&mut gat
 // ---------------------------------------------------------------------------
 
 fn policy_row(p: &RegisteredPolicy) -> PolicyRow {
-    let network = network_from_policy(p).map(network_display).unwrap_or(p.network.as_str());
+    let network = network_from_policy(p)
+        .map(network_display)
+        .unwrap_or(p.network.as_str());
     PolicyRow {
         id: p.descriptor_checksum.clone().into(),
         name: p.name.clone().into(),
@@ -1667,8 +1884,20 @@ fn policy_row(p: &RegisteredPolicy) -> PolicyRow {
 fn refresh_home(ui: &AppWindow, state: &Arc<Mutex<AppState>>) {
     let st = state.lock().unwrap();
     // Active policies drive the home list; archived ones live in the archive.
-    let active: Vec<PolicyRow> = st.policies.all().iter().filter(|p| !p.archived).map(policy_row).collect();
-    let archived: Vec<PolicyRow> = st.policies.all().iter().filter(|p| p.archived).map(policy_row).collect();
+    let active: Vec<PolicyRow> = st
+        .policies
+        .all()
+        .iter()
+        .filter(|p| !p.archived)
+        .map(policy_row)
+        .collect();
+    let archived: Vec<PolicyRow> = st
+        .policies
+        .all()
+        .iter()
+        .filter(|p| p.archived)
+        .map(policy_row)
+        .collect();
     let cb = ui.global::<Callbacks>();
     cb.set_policy_count(active.len() as i32);
     cb.set_archived_count(archived.len() as i32);
@@ -1682,8 +1911,16 @@ fn refresh_home(ui: &AppWindow, state: &Arc<Mutex<AppState>>) {
     // the wallet they're shown on.
     let active_id = cb.get_detail_id().to_string();
     let is_wallet = !active_id.is_empty() && st.policies.find_by_checksum(&active_id).is_some();
-    let pol = if is_wallet { st.policy_for(&active_id) } else { st.spend_policy.clone() };
-    let whist = if is_wallet { st.history.for_wallet(&active_id) } else { st.history.clone() };
+    let pol = if is_wallet {
+        st.policy_for(&active_id)
+    } else {
+        st.spend_policy.clone()
+    };
+    let whist = if is_wallet {
+        st.history.for_wallet(&active_id)
+    } else {
+        st.history.clone()
+    };
     cb.set_per_tx_limit(pol.per_tx_limit_sats.min(i32::MAX as u64) as i32);
     cb.set_daily_cap(pol.daily_cap_sats.unwrap_or(0).min(i32::MAX as u64) as i32);
     // Comma-formatted strings for display (Slint int interpolation has no commas).
@@ -1702,7 +1939,11 @@ fn refresh_home(ui: &AppWindow, state: &Arc<Mutex<AppState>>) {
     cb.set_safe_mode_reason(st.safe_mode_reason.clone().into());
     cb.set_frozen(pol.frozen);
     cb.set_time_caps_active(pol.clock.time_caps_enforceable());
-    let allow: Vec<SharedString> = pol.allowlist.iter().map(|a| SharedString::from(a.as_str())).collect();
+    let allow: Vec<SharedString> = pol
+        .allowlist
+        .iter()
+        .map(|a| SharedString::from(a.as_str()))
+        .collect();
     cb.set_allowlist_rows(ModelRc::new(VecModel::from(allow)));
 
     // Remaining auto-sign budget before the next approval (most-binding cap).
@@ -1729,7 +1970,10 @@ fn populate_detail(ui: &AppWindow, reg: &RegisteredPolicy) {
     cb.set_rename_value(reg.name.clone().into());
     cb.set_detail_checksum(format!("#{}", reg.descriptor_checksum).into());
     cb.set_detail_network(
-        network_from_policy(reg).map(network_display).unwrap_or(reg.network.as_str()).into(),
+        network_from_policy(reg)
+            .map(network_display)
+            .unwrap_or(reg.network.as_str())
+            .into(),
     );
     cb.set_detail_descriptor(reg.descriptor.clone().into());
     cb.set_detail_archived(reg.archived);
@@ -1800,7 +2044,11 @@ fn populate_detail(ui: &AppWindow, reg: &RegisteredPolicy) {
                     "Other key".to_string()
                 }
             };
-            SignerRow { fingerprint: s.fingerprint.clone().into(), owned: s.owned_by_passport, detail: role.into() }
+            SignerRow {
+                fingerprint: s.fingerprint.clone().into(),
+                owned: s.owned_by_passport,
+                detail: role.into(),
+            }
         })
         .collect();
     // Two or more external keys => a Platform Key is present (2-of-3), so Nunchuk
@@ -1809,7 +2057,14 @@ fn populate_detail(ui: &AppWindow, reg: &RegisteredPolicy) {
     cb.set_detail_signers(ModelRc::new(VecModel::from(signers)));
 }
 
-fn populate_review(ui: &AppWindow, reg: &RegisteredPolicy, psbt: &Psbt, m: &lpsbt::MatchResult, outflow: u64, decision: &gate::Decision) {
+fn populate_review(
+    ui: &AppWindow,
+    reg: &RegisteredPolicy,
+    psbt: &Psbt,
+    m: &lpsbt::MatchResult,
+    outflow: u64,
+    decision: &gate::Decision,
+) {
     let cb = ui.global::<Callbacks>();
     let is_recovery = matches!(m.active_path, Some(SpendPathKind::Recovery));
     let network = network_from_policy(reg).unwrap_or(DEFAULT_NETWORK);
@@ -1825,9 +2080,10 @@ fn populate_review(ui: &AppWindow, reg: &RegisteredPolicy, psbt: &Psbt, m: &lpsb
 
     let path_label = match m.active_path {
         Some(SpendPathKind::Primary) => tr::lookup_id(TrId::ReviewPathPrimary).to_string(),
-        Some(SpendPathKind::Recovery) => {
-            trfmt(TrId::ReviewPathRecovery, &[&m.active_timelock_blocks.unwrap_or(0).to_string()])
-        }
+        Some(SpendPathKind::Recovery) => trfmt(
+            TrId::ReviewPathRecovery,
+            &[&m.active_timelock_blocks.unwrap_or(0).to_string()],
+        ),
         None => tr::lookup_id(TrId::ReviewPathUnknown).to_string(),
     };
     cb.set_review_path_label(path_label.into());
@@ -1835,9 +2091,17 @@ fn populate_review(ui: &AppWindow, reg: &RegisteredPolicy, psbt: &Psbt, m: &lpsb
     // Outputs + fee. Build one row per output, flagging the ones that pay back
     // into this wallet (change) vs the ones actually leaving (destinations), so
     // the UI can separate them visually and we can total what's truly sent.
-    let out_sum: u64 = psbt.unsigned_tx.output.iter().map(|o| o.value.to_sat()).sum();
-    let in_sum: u64 =
-        psbt.inputs.iter().filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat())).sum();
+    let out_sum: u64 = psbt
+        .unsigned_tx
+        .output
+        .iter()
+        .map(|o| o.value.to_sat())
+        .sum();
+    let in_sum: u64 = psbt
+        .inputs
+        .iter()
+        .filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat()))
+        .sum();
 
     let mut rows: Vec<OutputRow> = Vec::new();
     let mut leaving: u64 = 0;
@@ -1846,10 +2110,14 @@ fn populate_review(ui: &AppWindow, reg: &RegisteredPolicy, psbt: &Psbt, m: &lpsb
         let (address, is_change) = match Address::from_script(&o.script_pubkey, network) {
             Ok(addr) => {
                 let a = addr.to_string();
-                let change = verify_address_in_policy(&reg.descriptor, &a.to_lowercase(), network).is_some();
+                let change =
+                    verify_address_in_policy(&reg.descriptor, &a.to_lowercase(), network).is_some();
                 (a, change)
             }
-            Err(_) => (tr::lookup_id(TrId::ReviewNonStandardScript).to_string(), false),
+            Err(_) => (
+                tr::lookup_id(TrId::ReviewNonStandardScript).to_string(),
+                false,
+            ),
         };
         if !is_change {
             leaving += sats;
@@ -1870,8 +2138,11 @@ fn populate_review(ui: &AppWindow, reg: &RegisteredPolicy, psbt: &Psbt, m: &lpsb
     // Change returns to the wallet, so it is excluded.
     cb.set_review_total_out(format!("{} sats", commas(leaving + fee)).into());
 
-    let warning =
-        if is_recovery { tr::lookup_id(TrId::ReviewRecoveryWarning).to_string() } else { String::new() };
+    let warning = if is_recovery {
+        tr::lookup_id(TrId::ReviewRecoveryWarning).to_string()
+    } else {
+        String::new()
+    };
     cb.set_review_warning(warning.into());
 
     let status = if !m.matched {
@@ -1924,7 +2195,9 @@ fn clear_verify(ui: &AppWindow) {
     cb.set_verify_detail("".into());
 }
 
-fn set_status(ui: &AppWindow, msg: &str) { ui.global::<Callbacks>().set_status(msg.to_string().into()); }
+fn set_status(ui: &AppWindow, msg: &str) {
+    ui.global::<Callbacks>().set_status(msg.to_string().into());
+}
 
 fn trfmt(id: TrId, args: &[&str]) -> String {
     let mut text = tr::lookup_id(id).to_string();
@@ -1934,7 +2207,9 @@ fn trfmt(id: TrId, args: &[&str]) -> String {
     text
 }
 
-fn format_saved_to(dest: &str) -> String { format!("{} {dest}", tr::lookup_id(TrId::ExportSavedTo)) }
+fn format_saved_to(dest: &str) -> String {
+    format!("{} {dest}", tr::lookup_id(TrId::ExportSavedTo))
+}
 
 // ---------------------------------------------------------------------------
 // Policy building / persistence
@@ -1983,7 +2258,12 @@ fn xpub_with_origin_at(
     let master = master_for_network(seed, network)?;
     let path = DerivationPath::from_str(path_str)?;
     let xpub = Xpub::from_priv(secp, &master.derive_priv(secp, &path)?);
-    Ok(format!("[{}/{}]{}", fp, path_str.trim_start_matches("m/"), xpub))
+    Ok(format!(
+        "[{}/{}]{}",
+        fp,
+        path_str.trim_start_matches("m/"),
+        xpub
+    ))
 }
 
 fn key_with_origin(
@@ -2096,9 +2376,14 @@ fn register_descriptor(
     let parsed = descriptor::import(text).map_err(|e| anyhow::anyhow!("{e}"))?;
     let id = parsed.checksum.clone();
     let network = network_from_descriptor(&parsed.canonical);
-    let reg =
-        policy::build_registered_policy(id, "Imported policy", network_label(network), &parsed, passport_fp)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let reg = policy::build_registered_policy(
+        id,
+        "Imported policy",
+        network_label(network),
+        &parsed,
+        passport_fp,
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
     if !reg.signers.iter().any(|s| s.owned_by_passport) {
         anyhow::bail!("{}", tr::lookup_id(TrId::ImportErrorNoPassportKey));
     }
@@ -2134,7 +2419,11 @@ fn seed_sample(
 }
 
 #[cfg(test)]
-fn sample_descriptor(secp: &Secp256k1<All>, device_account_xpub: &Xpub, device_fp: Fingerprint) -> String {
+fn sample_descriptor(
+    secp: &Secp256k1<All>,
+    device_account_xpub: &Xpub,
+    device_fp: Fingerprint,
+) -> String {
     let rec_master = Xpriv::new_master(DEFAULT_NETWORK, &[0x22; 32]).unwrap();
     let rec_fp = rec_master.fingerprint(secp);
     let acct = DerivationPath::from_str(TEST_ACCOUNT_PATH).unwrap();
@@ -2154,8 +2443,13 @@ fn build_owner_psbt(
     device_fp: Fingerprint,
 ) -> anyhow::Result<Psbt> {
     let parsed = descriptor::import(&reg.descriptor).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let singles = parsed.descriptor.into_single_descriptors().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let def = singles[0].at_derivation_index(0).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let singles = parsed
+        .descriptor
+        .into_single_descriptors()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let def = singles[0]
+        .at_derivation_index(0)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let spk = def.script_pubkey();
     let ws = def.explicit_script().map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -2165,7 +2459,8 @@ fn build_owner_psbt(
 
     let value = Amount::from_sat(100_000);
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+            .unwrap(),
         vout: 0,
     };
     let tx = Transaction {
@@ -2179,22 +2474,30 @@ fn build_owner_psbt(
         }],
         output: vec![TxOut {
             value: Amount::from_sat(90_000),
-            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead").unwrap(),
+            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead")
+                .unwrap(),
         }],
     };
     let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut input = Input {
-        witness_utxo: Some(TxOut { value, script_pubkey: spk }),
+        witness_utxo: Some(TxOut {
+            value,
+            script_pubkey: spk,
+        }),
         witness_script: Some(ws),
         ..Default::default()
     };
-    input.bip32_derivation.insert(dev_pk.inner, (device_fp, full));
+    input
+        .bip32_derivation
+        .insert(dev_pk.inner, (device_fp, full));
     psbt.inputs[0] = input;
     Ok(psbt)
 }
 
 fn policy_summary(p: &RegisteredPolicy) -> String {
-    let network = network_from_policy(p).map(network_display).unwrap_or(p.network.as_str());
+    let network = network_from_policy(p)
+        .map(network_display)
+        .unwrap_or(p.network.as_str());
     let recovery = p
         .paths
         .iter()
@@ -2206,12 +2509,16 @@ fn policy_summary(p: &RegisteredPolicy) -> String {
     }
 }
 
-fn load_policies(dir: &Path) -> store::PolicyStore { load_policies_impl(dir) }
+fn load_policies(dir: &Path) -> store::PolicyStore {
+    load_policies_impl(dir)
+}
 
 #[cfg(not(keyos))]
 fn load_policies_impl(dir: &Path) -> store::PolicyStore {
     let mut s = store::PolicyStore::new();
-    let Ok(entries) = std::fs::read_dir(dir) else { return s };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return s;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -2230,14 +2537,20 @@ fn load_policies_impl(dir: &Path) -> store::PolicyStore {
 fn load_policies_impl(_dir: &Path) -> store::PolicyStore {
     let fs = FileSystem::default();
     let mut s = store::PolicyStore::new();
-    let Ok(dir) = fs.open_dir("", fs::Location::AppData) else { return s };
+    let Ok(dir) = fs.open_dir("", fs::Location::AppData) else {
+        return s;
+    };
     while let Ok(Some(entry)) = dir.next_entry() {
         if !entry.name.starts_with("policy_") || !entry.name.ends_with(".json") || entry.is_dir {
             continue;
         }
-        let Ok(text) =
-            read_text_fs_limited(&fs, &entry.name, fs::Location::AppData, MAX_DESCRIPTOR_BYTES, "policy")
-        else {
+        let Ok(text) = read_text_fs_limited(
+            &fs,
+            &entry.name,
+            fs::Location::AppData,
+            MAX_DESCRIPTOR_BYTES,
+            "policy",
+        ) else {
             continue;
         };
         if let Ok(reg) = store::from_json(&text) {
@@ -2247,7 +2560,9 @@ fn load_policies_impl(_dir: &Path) -> store::PolicyStore {
     s
 }
 
-fn save_policy(dir: &Path, reg: &RegisteredPolicy) -> anyhow::Result<()> { save_policy_impl(dir, reg) }
+fn save_policy(dir: &Path, reg: &RegisteredPolicy) -> anyhow::Result<()> {
+    save_policy_impl(dir, reg)
+}
 
 #[cfg(not(keyos))]
 fn save_policy_impl(dir: &Path, reg: &RegisteredPolicy) -> anyhow::Result<()> {
@@ -2263,17 +2578,25 @@ fn save_policy_impl(_dir: &Path, reg: &RegisteredPolicy) -> anyhow::Result<()> {
 
     let json = store::to_json(reg).map_err(|e| anyhow::anyhow!("{e}"))?;
     let path = format!("policy_{}.json", reg.descriptor_checksum);
-    let mut fs = FileSystem::default();
+    let fs = FileSystem::default();
     {
         let mut file = fs
-            .open_file(&path, fs::Location::AppData, fs::OpenFlags { read: true, write: true, create: true })
+            .open_file(
+                &path,
+                fs::Location::AppData,
+                fs::OpenFlags {
+                    read: true,
+                    write: true,
+                    create: true,
+                },
+            )
             .map_err(|e| anyhow::anyhow!("open {path}: {e:?}"))?;
         file.seek(SeekFrom::Start(0))?;
         file.write_all(json.as_bytes())?;
-        file.truncate().map_err(|e| anyhow::anyhow!("truncate {path}: {e:?}"))?;
+        file.truncate()
+            .map_err(|e| anyhow::anyhow!("truncate {path}: {e:?}"))?;
         file.flush()?;
     }
-    fs.flush(fs::Location::AppData).map_err(|e| anyhow::anyhow!("flush app data: {e:?}"))?;
     Ok(())
 }
 
@@ -2307,7 +2630,9 @@ fn sim_bridge_file(dir: &Path, filename: &str) -> Option<PathBuf> {
 }
 
 #[cfg(keyos)]
-fn sim_bridge_file(_dir: &Path, _filename: &str) -> Option<PathBuf> { None }
+fn sim_bridge_file(_dir: &Path, _filename: &str) -> Option<PathBuf> {
+    None
+}
 
 #[cfg(not(keyos))]
 fn write_bridge_file(dir: &Path, filename: &str, bytes: &[u8]) {
@@ -2346,14 +2671,20 @@ fn scan_address_qr() -> Option<String> {
 /// lowercase (bech32 is case-insensitive; derived addresses are lowercase).
 fn normalize_address(raw: &str) -> String {
     let s = raw.trim();
-    let s = s.strip_prefix("bitcoin:").or_else(|| s.strip_prefix("BITCOIN:")).unwrap_or(s);
+    let s = s
+        .strip_prefix("bitcoin:")
+        .or_else(|| s.strip_prefix("BITCOIN:"))
+        .unwrap_or(s);
     s.split('?').next().unwrap_or(s).trim().to_lowercase()
 }
 
 fn read_bytes_path_limited(path: &Path, max_bytes: u64, label: &str) -> anyhow::Result<Vec<u8>> {
     let meta = std::fs::metadata(path)?;
     if meta.len() > max_bytes {
-        anyhow::bail!("{label} file is too large ({} bytes, max {max_bytes})", meta.len());
+        anyhow::bail!(
+            "{label} file is too large ({} bytes, max {max_bytes})",
+            meta.len()
+        );
     }
     let file = std::fs::File::open(path)?;
     let mut bytes = Vec::with_capacity(meta.len() as usize);
@@ -2365,8 +2696,10 @@ fn read_bytes_path_limited(path: &Path, max_bytes: u64, label: &str) -> anyhow::
 }
 
 fn read_text_path_limited(path: &Path, max_bytes: u64, label: &str) -> anyhow::Result<String> {
-    Ok(String::from_utf8(read_bytes_path_limited(path, max_bytes, label)?)
-        .map_err(|_| anyhow::anyhow!("{label} file is not valid UTF-8"))?)
+    Ok(
+        String::from_utf8(read_bytes_path_limited(path, max_bytes, label)?)
+            .map_err(|_| anyhow::anyhow!("{label} file is not valid UTF-8"))?,
+    )
 }
 
 fn read_bytes_fs_limited(
@@ -2376,15 +2709,30 @@ fn read_bytes_fs_limited(
     max_bytes: u64,
     label: &str,
 ) -> anyhow::Result<Vec<u8>> {
-    let meta = filesystem.metadata(path, location).map_err(|e| anyhow::anyhow!("metadata {path}: {e:?}"))?;
+    let meta = filesystem
+        .metadata(path, location)
+        .map_err(|e| anyhow::anyhow!("metadata {path}: {e:?}"))?;
     if meta.size > max_bytes {
-        anyhow::bail!("{label} file is too large ({} bytes, max {max_bytes})", meta.size);
+        anyhow::bail!(
+            "{label} file is too large ({} bytes, max {max_bytes})",
+            meta.size
+        );
     }
     let file = filesystem
-        .open_file(path, location, fs::OpenFlags { read: true, write: false, create: false })
+        .open_file(
+            path,
+            location,
+            fs::OpenFlags {
+                read: true,
+                write: false,
+                create: false,
+            },
+        )
         .map_err(|e| anyhow::anyhow!("open {path}: {e:?}"))?;
     let mut bytes = Vec::with_capacity(meta.size as usize);
-    file.take(max_bytes + 1).read_to_end(&mut bytes).map_err(|e| anyhow::anyhow!("read {path}: {e:?}"))?;
+    file.take(max_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| anyhow::anyhow!("read {path}: {e:?}"))?;
     if bytes.len() as u64 > max_bytes {
         anyhow::bail!("{label} file is too large (max {max_bytes})");
     }
@@ -2398,13 +2746,19 @@ fn read_text_fs_limited(
     max_bytes: u64,
     label: &str,
 ) -> anyhow::Result<String> {
-    Ok(String::from_utf8(read_bytes_fs_limited(filesystem, path, location, max_bytes, label)?)
-        .map_err(|_| anyhow::anyhow!("{label} file is not valid UTF-8"))?)
+    Ok(String::from_utf8(read_bytes_fs_limited(
+        filesystem, path, location, max_bytes, label,
+    )?)
+    .map_err(|_| anyhow::anyhow!("{label} file is not valid UTF-8"))?)
 }
 
 /// Is `target` an address derived from this policy's descriptor? Returns the
 /// path ("receive"/"change") and derivation index if found.
-fn verify_address_in_policy(descriptor_str: &str, target: &str, network: Network) -> Option<(String, u32)> {
+fn verify_address_in_policy(
+    descriptor_str: &str,
+    target: &str,
+    network: Network,
+) -> Option<(String, u32)> {
     let parsed = descriptor::import(descriptor_str).ok()?;
     let singles = parsed.descriptor.into_single_descriptors().ok()?;
     for (si, single) in singles.iter().enumerate() {
@@ -2469,12 +2823,7 @@ fn read_psbt_file(path: &Path) -> anyhow::Result<Psbt> {
 /// Write `bytes` to a fresh file inside `dir` at `location`, committing it in the
 /// order that survives card removal on FAT media: chunked write -> `File::flush`
 /// (which writes the directory entry: size / first_cluster / mtime) -> close the
-/// file -> `FileSystem::flush` (which flushes the block cache to the medium).
-///
-/// The directory-entry flush on close is the critical step (see SFT-7122): in
-/// rust-fatfs the FAT and data bytes hit the block cache during the write, but the
-/// directory entry only persists on `File::flush` / close. A bare
-/// `FileSystem::flush` on a still-open file leaves a stale entry and a torn image.
+/// File flush is required before close so the FAT directory entry is durable.
 fn write_export(
     filename: &str,
     bytes: &[u8],
@@ -2482,7 +2831,7 @@ fn write_export(
     dir: &str,
 ) -> anyhow::Result<String> {
     use std::io::Write;
-    let mut filesystem = FileSystem::default();
+    let filesystem = FileSystem::default();
     let directory = filesystem.create_dir(dir, location).map_err(|e| {
         if matches!(e, fs::Error::NoMedia) {
             match location {
@@ -2497,15 +2846,20 @@ fn write_export(
             anyhow::anyhow!("open {dir}: {e:?}")
         }
     })?;
-    let unique =
-        directory.pick_next_filename(filename, None).map_err(|e| anyhow::anyhow!("pick filename: {e:?}"))?;
+    let unique = directory
+        .pick_next_filename(filename, None)
+        .map_err(|e| anyhow::anyhow!("pick filename: {e:?}"))?;
     let path = format!("{dir}/{unique}");
     {
         let mut file = filesystem
             .open_file(
                 path.clone(),
                 location,
-                fs::OpenFlags { read: false, write: true, create: true },
+                fs::OpenFlags {
+                    read: false,
+                    write: true,
+                    create: true,
+                },
             )
             .map_err(|e| anyhow::anyhow!("open {path}: {e:?}"))?;
         let mut written = 0usize;
@@ -2519,16 +2873,14 @@ fn write_export(
             }
             written += n;
         }
-        // Commit the directory entry (NOT done by FileSystem::flush alone).
-        file.flush().map_err(|e| anyhow::anyhow!("flush {path}: {e:?}"))?;
-    } // drop file -> CloseFile (re-commits the directory entry)
-    drop(directory); // CloseDir
-    filesystem.flush(location).map_err(|e| anyhow::anyhow!("flush fs: {e:?}"))?;
+        file.flush()
+            .map_err(|e| anyhow::anyhow!("flush {path}: {e:?}"))?;
+    }
+    drop(directory);
     Ok(format!("{}{}", loc_label(location), path))
 }
 
-/// Open the folder picker and write `filename` into the chosen folder/location
-/// (SD, USB, internal, or Airlock), using the close-before-flush sequence above.
+/// Open the folder picker and write `filename` into the selected location.
 fn export_via_picker(filename: &str, bytes: &[u8]) -> anyhow::Result<String> {
     let options = SelectFileOptions::default()
         .with_dir_selection_mode(true)
@@ -2543,7 +2895,11 @@ fn export_via_picker(filename: &str, bytes: &[u8]) -> anyhow::Result<String> {
     };
     let dir = dir.trim_end_matches('/').to_string();
     // Picking a location root gives an empty path; tuck files into a `nunchuk/` subdir.
-    let dir = if dir.is_empty() { EXPORT_DIR.to_string() } else { dir };
+    let dir = if dir.is_empty() {
+        EXPORT_DIR.to_string()
+    } else {
+        dir
+    };
     write_export(filename, bytes, map_location(loc), &dir)
 }
 
@@ -2560,8 +2916,8 @@ fn loc_label(loc: fs::Location) -> &'static str {
 /// its text contents. Used to import a Nunchuk descriptor.
 fn import_via_picker() -> anyhow::Result<String> {
     let options = SelectFileOptions::default().with_allowed_locations(AllowedLocations::All);
-    let result =
-        select_file::<GuiPermissions>(options).map_err(|e| anyhow::anyhow!("picker error: {e:?}"))?;
+    let result = select_file::<GuiPermissions>(options)
+        .map_err(|e| anyhow::anyhow!("picker error: {e:?}"))?;
     let Some(result) = result else {
         anyhow::bail!("cancelled");
     };
@@ -2569,7 +2925,13 @@ fn import_via_picker() -> anyhow::Result<String> {
         anyhow::bail!("no file selected");
     };
     let filesystem = FileSystem::default();
-    read_text_fs_limited(&filesystem, &path, map_location(loc), MAX_DESCRIPTOR_BYTES, "descriptor")
+    read_text_fs_limited(
+        &filesystem,
+        &path,
+        map_location(loc),
+        MAX_DESCRIPTOR_BYTES,
+        "descriptor",
+    )
 }
 
 fn map_location(loc: PickLocation) -> fs::Location {
@@ -2585,7 +2947,6 @@ fn psbt_base64(psbt: &Psbt) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(psbt.serialize())
 }
-
 
 // ---------------------------------------------------------------------------
 // Nunchuk spending-policy gate: glue (seed, demo PSBT, persistence, clock)
@@ -2650,17 +3011,25 @@ fn write_one(dir: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
 #[cfg(keyos)]
 fn write_one(_dir: &Path, name: &str, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::{Seek, SeekFrom, Write};
-    let mut fs = FileSystem::default();
+    let fs = FileSystem::default();
     {
         let mut file = fs
-            .open_file(name, fs::Location::AppData, fs::OpenFlags { read: true, write: true, create: true })
+            .open_file(
+                name,
+                fs::Location::AppData,
+                fs::OpenFlags {
+                    read: true,
+                    write: true,
+                    create: true,
+                },
+            )
             .map_err(|e| anyhow::anyhow!("open {name}: {e:?}"))?;
         file.seek(SeekFrom::Start(0))?;
         file.write_all(bytes)?;
-        file.truncate().map_err(|e| anyhow::anyhow!("truncate {name}: {e:?}"))?;
+        file.truncate()
+            .map_err(|e| anyhow::anyhow!("truncate {name}: {e:?}"))?;
         file.flush()?;
     }
-    fs.flush(fs::Location::AppData).map_err(|e| anyhow::anyhow!("flush app data: {e:?}"))?;
     Ok(())
 }
 
@@ -2672,7 +3041,14 @@ fn read_one(dir: &Path, name: &str) -> Option<Vec<u8>> {
 #[cfg(keyos)]
 fn read_one(_dir: &Path, name: &str) -> Option<Vec<u8>> {
     let fs = FileSystem::default();
-    read_bytes_fs_limited(&fs, name, fs::Location::AppData, MAX_DESCRIPTOR_BYTES, "json").ok()
+    read_bytes_fs_limited(
+        &fs,
+        name,
+        fs::Location::AppData,
+        MAX_DESCRIPTOR_BYTES,
+        "json",
+    )
+    .ok()
 }
 
 fn read_versioned_slot(dir: &Path, name: &str) -> Option<Versioned> {
@@ -2697,7 +3073,10 @@ fn save_versioned<T: serde::Serialize>(dir: &Path, name: &str, value: &T) -> any
             }
         }
     };
-    let env = Versioned { seq: next_seq, data: serde_json::to_value(value)? };
+    let env = Versioned {
+        seq: next_seq,
+        data: serde_json::to_value(value)?,
+    };
     write_one(dir, &target, serde_json::to_string(&env)?.as_bytes())
 }
 
@@ -2805,7 +3184,10 @@ fn primary_dest(psbt: &Psbt, reg: &RegisteredPolicy) -> String {
     let network = network_from_policy(reg).unwrap_or(DEFAULT_NETWORK);
     let cands = lpsbt::candidate_spks(reg, GAP).ok();
     for o in &psbt.unsigned_tx.output {
-        let is_change = cands.as_ref().map(|c| c.contains(&o.script_pubkey)).unwrap_or(false);
+        let is_change = cands
+            .as_ref()
+            .map(|c| c.contains(&o.script_pubkey))
+            .unwrap_or(false);
         if !is_change {
             return Address::from_script(&o.script_pubkey, network)
                 .map(|a| a.to_string())
@@ -2839,9 +3221,9 @@ fn seed_demo_wallet(
         Ok(format!("[{f}/{p}]{x}"))
     };
     let agent_key = det_key([0x42; 32])?; // the automated agent's hot key
-    // Primary path: 2-of-2 (agent + Prime) or 2-of-3 (agent + Nunchuk Platform Key
-    // + Prime). Recovery key reuses Prime's xpub at <2;3> so its addresses never
-    // collide with the multisig ones.
+                                          // Primary path: 2-of-2 (agent + Prime) or 2-of-3 (agent + Nunchuk Platform Key
+                                          // + Prime). Recovery key reuses Prime's xpub at <2;3> so its addresses never
+                                          // collide with the multisig ones.
     let multi_keys = if with_platform_key {
         let platform_key = det_key([0x77; 32])?; // stand-in for the Nunchuk Platform Key
         format!("{agent_key}/<0;1>/*,{dev_key}/<0;1>/*,{platform_key}/<0;1>/*")
@@ -2877,8 +3259,13 @@ fn build_recovery_demo_psbt(
 ) -> anyhow::Result<Psbt> {
     let network = network_from_policy(reg).unwrap_or(DEFAULT_NETWORK);
     let parsed = descriptor::import(&reg.descriptor).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let singles = parsed.descriptor.into_single_descriptors().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let def = singles[0].at_derivation_index(0).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let singles = parsed
+        .descriptor
+        .into_single_descriptors()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let def = singles[0]
+        .at_derivation_index(0)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let spk = def.script_pubkey();
     let ws = def.explicit_script().map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -2892,7 +3279,8 @@ fn build_recovery_demo_psbt(
 
     let value = Amount::from_sat(amount + 1_000);
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+            .unwrap(),
         vout: 0,
     };
     let tx = Transaction {
@@ -2907,12 +3295,22 @@ fn build_recovery_demo_psbt(
         }],
         output: vec![TxOut {
             value: Amount::from_sat(amount),
-            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead").unwrap(),
+            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead")
+                .unwrap(),
         }],
     };
     let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let mut input = Input { witness_utxo: Some(TxOut { value, script_pubkey: spk }), witness_script: Some(ws), ..Default::default() };
-    input.bip32_derivation.insert(rec_pk.inner, (device_fp, rec_full));
+    let mut input = Input {
+        witness_utxo: Some(TxOut {
+            value,
+            script_pubkey: spk,
+        }),
+        witness_script: Some(ws),
+        ..Default::default()
+    };
+    input
+        .bip32_derivation
+        .insert(rec_pk.inner, (device_fp, rec_full));
     psbt.inputs[0] = input;
     Ok(psbt)
 }
@@ -2929,8 +3327,13 @@ fn build_demo_psbt(
 ) -> anyhow::Result<Psbt> {
     let network = network_from_policy(reg).unwrap_or(DEFAULT_NETWORK);
     let parsed = descriptor::import(&reg.descriptor).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let singles = parsed.descriptor.into_single_descriptors().map_err(|e| anyhow::anyhow!("{e}"))?;
-    let def = singles[0].at_derivation_index(0).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let singles = parsed
+        .descriptor
+        .into_single_descriptors()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let def = singles[0]
+        .at_derivation_index(0)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     let spk = def.script_pubkey();
     let ws = def.explicit_script().map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -2943,7 +3346,8 @@ fn build_demo_psbt(
 
     let value = Amount::from_sat(amount + 1_000);
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
+            .unwrap(),
         vout: 0,
     };
     let tx = Transaction {
@@ -2957,12 +3361,22 @@ fn build_demo_psbt(
         }],
         output: vec![TxOut {
             value: Amount::from_sat(amount),
-            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead").unwrap(),
+            script_pubkey: ScriptBuf::from_hex("0014000000000000000000000000000000000000dead")
+                .unwrap(),
         }],
     };
     let mut psbt = Psbt::from_unsigned_tx(tx).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let mut input = Input { witness_utxo: Some(TxOut { value, script_pubkey: spk }), witness_script: Some(ws), ..Default::default() };
-    input.bip32_derivation.insert(dev_pk.inner, (device_fp, full));
+    let mut input = Input {
+        witness_utxo: Some(TxOut {
+            value,
+            script_pubkey: spk,
+        }),
+        witness_script: Some(ws),
+        ..Default::default()
+    };
+    input
+        .bip32_derivation
+        .insert(dev_pk.inner, (device_fp, full));
     psbt.inputs[0] = input;
     Ok(psbt)
 }
@@ -3005,14 +3419,22 @@ fn auto_sign_pending(ui: &AppWindow, state: &Arc<Mutex<AppState>>, pending: Pend
                     st.history.records.pop();
                     st.safe_mode = true;
                     st.safe_mode_reason =
-                        "Couldn't record the last spend to the ledger; auto-signing is paused.".to_string();
-                    set_status(ui, &format!("auto-sign withheld: ledger write failed ({e})"));
+                        "Couldn't record the last spend to the ledger; auto-signing is paused."
+                            .to_string();
+                    set_status(
+                        ui,
+                        &format!("auto-sign withheld: ledger write failed ({e})"),
+                    );
                     return;
                 }
                 // Now expose the signed PSBT to the host.
                 st.last_signed = Some(signed.serialize());
                 write_bridge_file(&st.data_dir, SIGNED_PSBT_FILE, &signed.serialize());
-                write_bridge_file(&st.data_dir, "signed-psbt.b64.txt", psbt_base64(&signed).as_bytes());
+                write_bridge_file(
+                    &st.data_dir,
+                    "signed-psbt.b64.txt",
+                    psbt_base64(&signed).as_bytes(),
+                );
                 true
             }
             Err(e) => {
@@ -3056,13 +3478,23 @@ mod tests {
     fn real_nunchuk_descriptor_parses_and_matches_checksum() {
         const REAL: &str = "wsh(or_d(pk([22663c8a/48'/1'/0'/2']tpubDDz15PcqAurpydRu3ZD7EB9nGRFEttDcbge8sPTqBo2fGXQkdoLjwAkoHjKFkqBFpkrZ8dS6DSDB5bG5EC5XcbJ5LuTRbgtgoCugm7puBAX/<0;1>/*),and_v(v:pkh([22663c8a/48'/1'/0'/2']tpubDDz15PcqAurpydRu3ZD7EB9nGRFEttDcbge8sPTqBo2fGXQkdoLjwAkoHjKFkqBFpkrZ8dS6DSDB5bG5EC5XcbJ5LuTRbgtgoCugm7puBAX/<2;3>/*),older(52596))))#9xtyycfv";
         let parsed = descriptor::import(REAL).expect("real Nunchuk descriptor imports");
-        assert_eq!(parsed.checksum, "9xtyycfv", "our checksum must match Nunchuk's");
+        assert_eq!(
+            parsed.checksum, "9xtyycfv",
+            "our checksum must match Nunchuk's"
+        );
         let fp = Fingerprint::from_str("22663c8a").unwrap();
         let reg = policy::build_registered_policy("real", "Real", "signet", &parsed, fp).unwrap();
         assert_eq!(reg.paths.len(), 2);
-        let recovery = reg.paths.iter().find(|p| matches!(p.kind, SpendPathKind::Recovery)).unwrap();
+        let recovery = reg
+            .paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Recovery))
+            .unwrap();
         assert_eq!(recovery.relative_timelock_blocks, Some(52596));
-        assert!(reg.signers.iter().all(|s| s.fingerprint == "22663c8a" && s.owned_by_passport));
+        assert!(reg
+            .signers
+            .iter()
+            .all(|s| s.fingerprint == "22663c8a" && s.owned_by_passport));
     }
 
     #[test]
@@ -3073,8 +3505,13 @@ mod tests {
         let parsed = descriptor::import(&desc).expect("imports");
         let paths = policy::analyze_paths(&parsed.descriptor).expect("analyze");
         assert_eq!(paths.len(), 2);
-        assert!(paths.iter().any(|p| matches!(p.kind, SpendPathKind::Primary)));
-        let rec = paths.iter().find(|p| matches!(p.kind, SpendPathKind::Recovery)).unwrap();
+        assert!(paths
+            .iter()
+            .any(|p| matches!(p.kind, SpendPathKind::Primary)));
+        let rec = paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Recovery))
+            .unwrap();
         assert_eq!(rec.relative_timelock_blocks, Some(RECOVERY_BLOCKS));
     }
 
@@ -3101,7 +3538,13 @@ mod tests {
         let parsed = descriptor::import(&desc).expect("decaying descriptor imports");
         let paths = policy::analyze_paths(&parsed.descriptor).expect("analyze");
         assert_eq!(paths.len(), 3, "primary + 2 recovery tiers");
-        assert_eq!(paths.iter().filter(|p| matches!(p.kind, SpendPathKind::Primary)).count(), 1);
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|p| matches!(p.kind, SpendPathKind::Primary))
+                .count(),
+            1
+        );
         let mut tls: Vec<u32> = paths
             .iter()
             .filter(|p| matches!(p.kind, SpendPathKind::Recovery))
@@ -3118,15 +3561,23 @@ mod tests {
     fn plain_two_of_three_has_no_recovery_path() {
         let (_secp, _xpub, fp) = device();
         let (agent, prime, platform) = (test_key(0x42), test_key(0x11), test_key(0x99));
-        let desc = format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{platform}/<0;1>/*))");
+        let desc =
+            format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{platform}/<0;1>/*))");
         let parsed = descriptor::import(&desc).expect("plain 2-of-3 imports");
         let paths = policy::analyze_paths(&parsed.descriptor).expect("analyze");
         assert_eq!(paths.len(), 1, "no recovery branch");
         assert!(matches!(paths[0].kind, SpendPathKind::Primary));
         assert_eq!((paths[0].threshold, paths[0].total_keys), (2, 3));
         let reg = policy::build_registered_policy("p", "Plain", "testnet", &parsed, fp).unwrap();
-        assert!(reg.signers.iter().any(|s| s.fingerprint == fp.to_string() && s.owned_by_passport));
-        assert_eq!(reg.signers.iter().filter(|s| !s.owned_by_passport).count(), 2, "agent + Platform Key");
+        assert!(reg
+            .signers
+            .iter()
+            .any(|s| s.fingerprint == fp.to_string() && s.owned_by_passport));
+        assert_eq!(
+            reg.signers.iter().filter(|s| !s.owned_by_passport).count(),
+            2,
+            "agent + Platform Key"
+        );
     }
 
     // CLI-driven 2-of-3 WITH a recovery leg (distinct recovery key, as Nunchuk's CLI
@@ -3134,17 +3585,27 @@ mod tests {
     // path with its timelock, so the detail screen can display them.
     #[test]
     fn two_of_three_with_recovery_leg_classifies_both_paths() {
-        let (agent, prime, platform, recovery) =
-            (test_key(0x42), test_key(0x11), test_key(0x99), test_key(0xAB));
+        let (agent, prime, platform, recovery) = (
+            test_key(0x42),
+            test_key(0x11),
+            test_key(0x99),
+            test_key(0xAB),
+        );
         let desc = format!(
             "wsh(or_d(multi(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{platform}/<0;1>/*),and_v(v:pk({recovery}/<0;1>/*),older(26280))))"
         );
         let parsed = descriptor::import(&desc).expect("2-of-3 + recovery imports");
         let paths = policy::analyze_paths(&parsed.descriptor).expect("analyze");
         assert_eq!(paths.len(), 2, "everyday + recovery");
-        let primary = paths.iter().find(|p| matches!(p.kind, SpendPathKind::Primary)).unwrap();
+        let primary = paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Primary))
+            .unwrap();
         assert_eq!((primary.threshold, primary.total_keys), (2, 3));
-        let rec = paths.iter().find(|p| matches!(p.kind, SpendPathKind::Recovery)).unwrap();
+        let rec = paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Recovery))
+            .unwrap();
         assert_eq!(rec.relative_timelock_blocks, Some(26280));
     }
 
@@ -3175,12 +3636,18 @@ mod tests {
         save_versioned(&dir, "t.json", &p).unwrap(); // both slots now hold valid copies
         std::fs::write(dir.join("t.json.1"), b"{ truncated").unwrap(); // simulate a power-cut
         assert!(
-            matches!(load_versioned::<gate::SpendPolicy>(&dir, "t.json"), Loaded::Valid(_)),
+            matches!(
+                load_versioned::<gate::SpendPolicy>(&dir, "t.json"),
+                Loaded::Valid(_)
+            ),
             "the other good slot must survive a torn write"
         );
         std::fs::write(dir.join("t.json.0"), b"garbage").unwrap();
         assert!(
-            matches!(load_versioned::<gate::SpendPolicy>(&dir, "t.json"), Loaded::Corrupt),
+            matches!(
+                load_versioned::<gate::SpendPolicy>(&dir, "t.json"),
+                Loaded::Corrupt
+            ),
             "both slots bad must report Corrupt, never silently default"
         );
         let _ = std::fs::remove_dir_all(&dir);
@@ -3208,8 +3675,13 @@ mod tests {
         assert!(parsed.canonical.starts_with("tr("));
         let paths = policy::analyze_paths(&parsed.descriptor).expect("analyze");
         assert_eq!(paths.len(), 2);
-        assert!(paths.iter().any(|p| matches!(p.kind, SpendPathKind::Primary)));
-        let rec = paths.iter().find(|p| matches!(p.kind, SpendPathKind::Recovery)).unwrap();
+        assert!(paths
+            .iter()
+            .any(|p| matches!(p.kind, SpendPathKind::Primary)));
+        let rec = paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Recovery))
+            .unwrap();
         assert_eq!(rec.relative_timelock_blocks, Some(4032));
     }
 
@@ -3220,7 +3692,10 @@ mod tests {
         // Exactly one signer, the device, owns a key.
         let owned = reg.signers.iter().filter(|s| s.owned_by_passport).count();
         assert_eq!(owned, 1);
-        assert!(reg.signers.iter().any(|s| s.fingerprint == fp.to_string() && s.owned_by_passport));
+        assert!(reg
+            .signers
+            .iter()
+            .any(|s| s.fingerprint == fp.to_string() && s.owned_by_passport));
     }
 
     #[test]
@@ -3237,7 +3712,10 @@ mod tests {
         // The decision gate must allow, and signing must finalize.
         assert!(matches!(
             signing::decide(&m, &reg),
-            signing::SignDecision::Allow { path: SpendPathKind::Primary, .. }
+            signing::SignDecision::Allow {
+                path: SpendPathKind::Primary,
+                ..
+            }
         ));
         let master = Xpriv::new_master(DEFAULT_NETWORK, &[0x11; 32]).unwrap();
         let finalized = signing::sign_and_finalize(psbt, &master, &secp).expect("sign");
@@ -3247,7 +3725,9 @@ mod tests {
     #[test]
     fn register_descriptor_rejects_garbage() {
         let (secp, _, fp) = device();
-        assert!(register_descriptor("definitely not a descriptor", fp, &[0x11; 32], &secp).is_err());
+        assert!(
+            register_descriptor("definitely not a descriptor", fp, &[0x11; 32], &secp).is_err()
+        );
     }
 
     #[test]
@@ -3255,7 +3735,9 @@ mod tests {
         let (secp, xpub, fp) = device();
         let desc = sample_descriptor(&secp, &xpub, fp);
         let wrong_fp = Fingerprint::from_str("deadbeef").unwrap();
-        let err = register_descriptor(&desc, wrong_fp, &[0x11; 32], &secp).unwrap_err().to_string();
+        let err = register_descriptor(&desc, wrong_fp, &[0x11; 32], &secp)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("does not contain this Passport"), "got: {err}");
     }
 
@@ -3276,7 +3758,9 @@ mod tests {
         let desc = format!(
             "wsh(or_d(pk([{fp}/{p}]{foreign_xpub}/<0;1>/*),and_v(v:pkh([{rec_fp}/{p}]{rec_xpub}/<0;1>/*),older(52560))))"
         );
-        let err = register_descriptor(&desc, fp, &[0x11; 32], &secp).unwrap_err().to_string();
+        let err = register_descriptor(&desc, fp, &[0x11; 32], &secp)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("not Passport's actual key"), "got: {err}");
     }
 
@@ -3335,13 +3819,29 @@ mod tests {
     fn demo_wallet_is_miniscript_2of2_plus_recovery() {
         let (secp, _x, fp) = device();
         let reg = seed_demo_wallet(&[0x11; 32], &secp, fp, 20, false).unwrap();
-        assert!(reg.descriptor.starts_with("wsh(or_d("), "got: {}", reg.descriptor);
-        assert!(reg.descriptor.contains("older(20)"), "got: {}", reg.descriptor);
+        assert!(
+            reg.descriptor.starts_with("wsh(or_d("),
+            "got: {}",
+            reg.descriptor
+        );
+        assert!(
+            reg.descriptor.contains("older(20)"),
+            "got: {}",
+            reg.descriptor
+        );
         // Two spend paths: a 2-of-2 primary and a timelocked recovery.
         assert_eq!(reg.paths.len(), 2);
-        let primary = reg.paths.iter().find(|p| matches!(p.kind, SpendPathKind::Primary)).unwrap();
+        let primary = reg
+            .paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Primary))
+            .unwrap();
         assert_eq!((primary.threshold, primary.total_keys), (2, 2));
-        let rec = reg.paths.iter().find(|p| matches!(p.kind, SpendPathKind::Recovery)).unwrap();
+        let rec = reg
+            .paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Recovery))
+            .unwrap();
         assert_eq!(rec.relative_timelock_blocks, Some(20));
         // Device (Prime) owns a key (multisig + recovery both reference its fp).
         assert!(reg.signers.iter().any(|s| s.owned_by_passport));
@@ -3355,16 +3855,24 @@ mod tests {
         let psbt = build_recovery_demo_psbt(&seed, &secp, fp, &reg, 40_000, 20).unwrap();
         let m = lpsbt::match_psbt(&psbt, &reg, fp, GAP).unwrap();
         assert!(m.matched);
-        assert_eq!(m.active_path, Some(SpendPathKind::Recovery), "nSequence must select recovery");
+        assert_eq!(
+            m.active_path,
+            Some(SpendPathKind::Recovery),
+            "nSequence must select recovery"
+        );
         assert!(m.passport_can_sign, "Prime owns the recovery key");
         // Recovery always demands explicit confirmation (never silent).
         assert!(matches!(
             signing::decide(&m, &reg),
-            signing::SignDecision::Allow { requires_confirmation: true, .. }
+            signing::SignDecision::Allow {
+                requires_confirmation: true,
+                ..
+            }
         ));
         // Prime signs the recovery branch ALONE and it finalizes (pk + older satisfied).
         let master = master_for_network(&seed, DEFAULT_NETWORK).unwrap();
-        let finalized = signing::sign_and_finalize(psbt, &master, &secp).expect("recovery finalizes");
+        let finalized =
+            signing::sign_and_finalize(psbt, &master, &secp).expect("recovery finalizes");
         assert!(finalized.inputs[0].final_script_witness.is_some());
     }
 
@@ -3373,10 +3881,23 @@ mod tests {
         let (secp, _x, fp) = device();
         let seed = [0x11; 32];
         let reg = seed_demo_wallet(&seed, &secp, fp, 20, true).unwrap();
-        assert!(reg.descriptor.starts_with("wsh(or_d(multi(2,"), "got: {}", reg.descriptor);
-        let primary = reg.paths.iter().find(|p| matches!(p.kind, SpendPathKind::Primary)).unwrap();
-        assert_eq!((primary.threshold, primary.total_keys), (2, 3), "2-of-3 primary");
-        let fps: std::collections::HashSet<_> = reg.signers.iter().map(|s| s.fingerprint.clone()).collect();
+        assert!(
+            reg.descriptor.starts_with("wsh(or_d(multi(2,"),
+            "got: {}",
+            reg.descriptor
+        );
+        let primary = reg
+            .paths
+            .iter()
+            .find(|p| matches!(p.kind, SpendPathKind::Primary))
+            .unwrap();
+        assert_eq!(
+            (primary.threshold, primary.total_keys),
+            (2, 3),
+            "2-of-3 primary"
+        );
+        let fps: std::collections::HashSet<_> =
+            reg.signers.iter().map(|s| s.fingerprint.clone()).collect();
         assert_eq!(fps.len(), 3, "agent + prime + platform key");
         // Prime signs its slot; a 2-of-3 still needs one more, so not finalizable alone.
         let psbt = build_demo_psbt(&seed, &secp, fp, &reg, 50_000).unwrap();
@@ -3385,7 +3906,10 @@ mod tests {
         let master = master_for_network(&seed, DEFAULT_NETWORK).unwrap();
         let signed = signing::sign(psbt, &master, &secp).unwrap();
         assert!(!signed.inputs[0].partial_sigs.is_empty());
-        assert!(!signing::is_finalizable(&signed, &secp), "needs agent or platform key too");
+        assert!(
+            !signing::is_finalizable(&signed, &secp),
+            "needs agent or platform key too"
+        );
     }
 
     fn test_state(with_platform: bool) -> Arc<Mutex<AppState>> {
@@ -3397,7 +3921,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut policies = store::PolicyStore::new();
-        policies.add(seed_demo_wallet(&seed, &secp, fp, 20, with_platform).unwrap()).unwrap();
+        policies
+            .add(seed_demo_wallet(&seed, &secp, fp, 20, with_platform).unwrap())
+            .unwrap();
         Arc::new(Mutex::new(AppState {
             secp,
             seed,
@@ -3433,11 +3959,22 @@ mod tests {
             Response::Fingerprint { fingerprint } => assert_eq!(fingerprint.len(), 8),
             o => panic!("fingerprint: {o:?}"),
         }
-        match process_request(&st, Request::Xpub { path: "m/48'/1'/0'/2'".into() }) {
+        match process_request(
+            &st,
+            Request::Xpub {
+                path: "m/48'/1'/0'/2'".into(),
+            },
+        ) {
             Response::Key { key } => assert!(key.contains("tpub")),
             o => panic!("xpub: {o:?}"),
         }
-        match process_request(&st, Request::Showaddr { index: 0, change: false }) {
+        match process_request(
+            &st,
+            Request::Showaddr {
+                index: 0,
+                change: false,
+            },
+        ) {
             Response::Address { address } => assert!(address.starts_with("tb1"), "got: {address}"),
             o => panic!("showaddr: {o:?}"),
         }
@@ -3447,41 +3984,82 @@ mod tests {
             (g.fp, g.policies.all()[0].clone())
         };
         let psbt = build_demo_psbt(&[0x11; 32], &Secp256k1::new(), fp, &reg, 50_000).unwrap();
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&psbt) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&psbt),
+            },
+        ) {
             Response::Signed { psbt } => assert!(!psbt.is_empty()),
             o => panic!("sign: {o:?}"),
         }
         // Re-signing an already-signed in-policy tx is idempotent: cached, one log row.
         let hist_before = st.lock().unwrap().history.recent(99).len();
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&psbt) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&psbt),
+            },
+        ) {
             Response::Signed { psbt } => assert!(!psbt.is_empty()),
             o => panic!("re-sign: {o:?}"),
         }
-        assert_eq!(st.lock().unwrap().history.recent(99).len(), hist_before, "no duplicate log");
+        assert_eq!(
+            st.lock().unwrap().history.recent(99).len(),
+            hist_before,
+            "no duplicate log"
+        );
 
         // Over-policy sign -> Pending + queued for an on-device tap (not signed).
         let big = build_demo_psbt(&[0x11; 32], &Secp256k1::new(), fp, &reg, 500_000).unwrap();
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&big) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&big),
+            },
+        ) {
             Response::Pending { .. } => {}
             o => panic!("over-policy should be Pending, got {o:?}"),
         }
-        assert_eq!(st.lock().unwrap().pending_queue.len(), 1, "over-policy queued");
+        assert_eq!(
+            st.lock().unwrap().pending_queue.len(),
+            1,
+            "over-policy queued"
+        );
         // Re-pushing the same over-policy PSBT does not double-queue.
-        let _ = process_request(&st, Request::Sign { psbt: psbt_base64(&big) });
+        let _ = process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&big),
+            },
+        );
         assert_eq!(st.lock().unwrap().pending_queue.len(), 1, "dedup queue");
         // Register the already-known descriptor over USB -> idempotent Registered.
-        match process_request(&st, Request::Register { descriptor: reg.descriptor.clone() }) {
+        match process_request(
+            &st,
+            Request::Register {
+                descriptor: reg.descriptor.clone(),
+            },
+        ) {
             Response::Registered { checksum, .. } => assert_eq!(checksum, reg.descriptor_checksum),
             o => panic!("register: {o:?}"),
         }
         // Garbage descriptor -> Error, not a panic.
-        match process_request(&st, Request::Register { descriptor: "not a descriptor".into() }) {
+        match process_request(
+            &st,
+            Request::Register {
+                descriptor: "not a descriptor".into(),
+            },
+        ) {
             Response::Error { .. } => {}
             o => panic!("garbage register should Error, got {o:?}"),
         }
         // Spec reports the onboarding model + recovery timelock for the agent to read.
         match process_request(&st, Request::Spec) {
-            Response::Spec { model, recovery_blocks } => {
+            Response::Spec {
+                model,
+                recovery_blocks,
+            } => {
                 assert!(model == "2-of-2" || model == "2-of-3", "model: {model}");
                 assert!(recovery_blocks > 0, "recovery_blocks should be set");
             }
@@ -3508,7 +4086,8 @@ mod tests {
         let fp = master.fingerprint(secp);
         let child = DerivationPath::from_str("m/0/0").unwrap();
         let pk = PublicKey::new(acct_xpub.derive_pub(secp, &child).unwrap().public_key);
-        let full = DerivationPath::from_str(&format!("{}/0/0", account_path(DEFAULT_NETWORK))).unwrap();
+        let full =
+            DerivationPath::from_str(&format!("{}/0/0", account_path(DEFAULT_NETWORK))).unwrap();
         psbt.inputs[0].bip32_derivation.insert(pk.inner, (fp, full));
     }
 
@@ -3530,9 +4109,14 @@ mod tests {
         let master = master_for_network(&seed, DEFAULT_NETWORK).unwrap();
         let acct = DerivationPath::from_str(account_path(DEFAULT_NETWORK)).unwrap();
         let acct_xpub = Xpub::from_priv(&secp, &master.derive_priv(&secp, &acct).unwrap());
-        let dev_pk =
-            PublicKey::new(acct_xpub.derive_pub(&secp, &DerivationPath::from_str("m/0/0").unwrap()).unwrap().public_key);
-        let full = DerivationPath::from_str(&format!("{}/0/0", account_path(DEFAULT_NETWORK))).unwrap();
+        let dev_pk = PublicKey::new(
+            acct_xpub
+                .derive_pub(&secp, &DerivationPath::from_str("m/0/0").unwrap())
+                .unwrap()
+                .public_key,
+        );
+        let full =
+            DerivationPath::from_str(&format!("{}/0/0", account_path(DEFAULT_NETWORK))).unwrap();
         let dead = ScriptBuf::from_hex("0014000000000000000000000000000000000000dead").unwrap();
 
         let build = |second_spk: ScriptBuf| -> Psbt {
@@ -3541,7 +4125,10 @@ mod tests {
                 lock_time: LockTime::ZERO,
                 input: vec![TxIn {
                     previous_output: OutPoint {
-                        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap(),
+                        txid: Txid::from_str(
+                            "0000000000000000000000000000000000000000000000000000000000000001",
+                        )
+                        .unwrap(),
                         vout: 0,
                     },
                     script_sig: ScriptBuf::new(),
@@ -3549,24 +4136,38 @@ mod tests {
                     witness: Witness::new(),
                 }],
                 output: vec![
-                    TxOut { value: Amount::from_sat(50_000), script_pubkey: dead.clone() },
-                    TxOut { value: Amount::from_sat(149_700), script_pubkey: second_spk },
+                    TxOut {
+                        value: Amount::from_sat(50_000),
+                        script_pubkey: dead.clone(),
+                    },
+                    TxOut {
+                        value: Amount::from_sat(149_700),
+                        script_pubkey: second_spk,
+                    },
                 ],
             };
             let mut psbt = Psbt::from_unsigned_tx(tx).unwrap();
             let mut input = Input {
-                witness_utxo: Some(TxOut { value: Amount::from_sat(200_000), script_pubkey: in_spk.clone() }),
+                witness_utxo: Some(TxOut {
+                    value: Amount::from_sat(200_000),
+                    script_pubkey: in_spk.clone(),
+                }),
                 witness_script: Some(ws.clone()),
                 ..Default::default()
             };
-            input.bip32_derivation.insert(dev_pk.inner, (fp, full.clone()));
+            input
+                .bip32_derivation
+                .insert(dev_pk.inner, (fp, full.clone()));
             psbt.inputs[0] = input;
             psbt
         };
 
         // Change-branch output excluded -> outflow = external payment + fee.
         let with_change = build(change0.script_pubkey());
-        assert_eq!(lpsbt::outflow_sats(&with_change, &reg, GAP).unwrap(), 50_300);
+        assert_eq!(
+            lpsbt::outflow_sats(&with_change, &reg, GAP).unwrap(),
+            50_300
+        );
         // Receive-address self-send is NOT treated as change -> full input metered.
         let with_recv = build(recv0.script_pubkey());
         assert_eq!(lpsbt::outflow_sats(&with_recv, &reg, GAP).unwrap(), 200_000);
@@ -3593,34 +4194,71 @@ mod tests {
         add_agent_derivation(&mut psbt, &secp);
         let (agent_master, _) = agent_signer(&secp);
         let agent_signed = signing::sign(psbt, &agent_master, &secp).unwrap();
-        assert_eq!(agent_signed.inputs[0].partial_sigs.len(), 1, "agent contributes one sig");
-        assert!(!signing::is_finalizable(&agent_signed, &secp), "one of two is not enough");
+        assert_eq!(
+            agent_signed.inputs[0].partial_sigs.len(),
+            1,
+            "agent contributes one sig"
+        );
+        assert!(
+            !signing::is_finalizable(&agent_signed, &secp),
+            "one of two is not enough"
+        );
 
-        let resp = process_request(&st, Request::Sign { psbt: psbt_base64(&agent_signed) });
+        let resp = process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&agent_signed),
+            },
+        );
         let both = match resp {
             Response::Signed { psbt } => {
-                let raw = base64::engine::general_purpose::STANDARD.decode(psbt).unwrap();
+                let raw = base64::engine::general_purpose::STANDARD
+                    .decode(psbt)
+                    .unwrap();
                 Psbt::deserialize(&raw).unwrap()
             }
             o => panic!("under-policy 2-of-2 must auto-sign unattended, got {o:?}"),
         };
-        assert_eq!(both.inputs[0].partial_sigs.len(), 2, "agent + Prime signatures present");
-        assert!(signing::is_finalizable(&both, &secp), "agent + Prime finalizes the 2-of-2");
+        assert_eq!(
+            both.inputs[0].partial_sigs.len(),
+            2,
+            "agent + Prime signatures present"
+        );
+        assert!(
+            signing::is_finalizable(&both, &secp),
+            "agent + Prime finalizes the 2-of-2"
+        );
         {
             let g = st.lock().unwrap();
-            assert_eq!(g.history.recent(1)[0].kind, history::SignKind::Auto, "logged as unattended auto-sign");
-            assert!(g.pending.is_none() && g.pending_queue.is_empty(), "no approval surfaced for an in-policy spend");
+            assert_eq!(
+                g.history.recent(1)[0].kind,
+                history::SignKind::Auto,
+                "logged as unattended auto-sign"
+            );
+            assert!(
+                g.pending.is_none() && g.pending_queue.is_empty(),
+                "no approval surfaced for an in-policy spend"
+            );
         }
 
         // --- Over policy: routed to Prime for a human tap (NOT auto-signed). ---
         let mut big = build_demo_psbt(&seed, &secp, fp, &reg, 500_000).unwrap();
         add_agent_derivation(&mut big, &secp);
         let big_signed = signing::sign(big, &agent_master, &secp).unwrap();
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&big_signed) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&big_signed),
+            },
+        ) {
             Response::Pending { .. } => {}
             o => panic!("over-policy 2-of-2 must require a tap, got {o:?}"),
         }
-        assert_eq!(st.lock().unwrap().pending_queue.len(), 1, "over-policy spend queued for approval");
+        assert_eq!(
+            st.lock().unwrap().pending_queue.len(),
+            1,
+            "over-policy spend queued for approval"
+        );
     }
 
     // nunchuk-cli builds the Prime-alone recovery branch as a SECOND Prime account
@@ -3637,7 +4275,9 @@ mod tests {
         let secp = Secp256k1::new();
         let seed = [0x11u8; 32];
         let network = DEFAULT_NETWORK;
-        let fp = Xpriv::new_master(network, &seed).unwrap().fingerprint(&secp);
+        let fp = Xpriv::new_master(network, &seed)
+            .unwrap()
+            .fingerprint(&secp);
 
         // Prime's two accounts: acct 0' everyday (multi leg), acct 1' recovery leg.
         let prime0 = key_with_origin(&seed, &secp, fp, network).unwrap(); // m/48'/1'/0'/2'
@@ -3672,17 +4312,21 @@ mod tests {
             "both Prime accounts owned: {:?}",
             reg.signers
         );
-        assert!(reg.signers.iter().any(|s| !s.owned_by_passport), "agent key is external");
+        assert!(
+            reg.signers.iter().any(|s| !s.owned_by_passport),
+            "agent key is external"
+        );
         // A primary (no timelock) path and a recovery (older=N) path.
         assert!(
-            reg.paths.iter().any(|p| p.kind == SpendPathKind::Primary && p.relative_timelock_blocks.is_none()),
+            reg.paths
+                .iter()
+                .any(|p| p.kind == SpendPathKind::Primary && p.relative_timelock_blocks.is_none()),
             "primary path present: {:?}",
             reg.paths
         );
         assert!(
-            reg.paths
-                .iter()
-                .any(|p| p.kind == SpendPathKind::Recovery && p.relative_timelock_blocks == Some(recovery_blocks)),
+            reg.paths.iter().any(|p| p.kind == SpendPathKind::Recovery
+                && p.relative_timelock_blocks == Some(recovery_blocks)),
             "recovery path with older({recovery_blocks}): {:?}",
             reg.paths
         );
@@ -3721,14 +4365,30 @@ mod tests {
         let mut psbt = build_demo_psbt(&seed, &secp, fp, &reg, 50_000).unwrap();
         add_agent_derivation(&mut psbt, &secp);
         let agent_signed = signing::sign(psbt, &agent_master, &secp).unwrap();
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&agent_signed) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&agent_signed),
+            },
+        ) {
             Response::Signed { psbt } => {
-                let raw = base64::engine::general_purpose::STANDARD.decode(psbt).unwrap();
+                let raw = base64::engine::general_purpose::STANDARD
+                    .decode(psbt)
+                    .unwrap();
                 let both = Psbt::deserialize(&raw).unwrap();
-                assert_eq!(both.inputs[0].partial_sigs.len(), 2, "agent + Prime signatures present");
-                assert!(signing::is_finalizable(&both, &secp), "agent + Prime finalizes the everyday leg");
+                assert_eq!(
+                    both.inputs[0].partial_sigs.len(),
+                    2,
+                    "agent + Prime signatures present"
+                );
+                assert!(
+                    signing::is_finalizable(&both, &secp),
+                    "agent + Prime finalizes the everyday leg"
+                );
             }
-            o => panic!("everyday leg of the two-account recovery wallet should auto-sign, got {o:?}"),
+            o => panic!(
+                "everyday leg of the two-account recovery wallet should auto-sign, got {o:?}"
+            ),
         }
     }
 
@@ -3751,11 +4411,22 @@ mod tests {
             add_agent_derivation(&mut p, &secp);
             let (agent_master, _) = agent_signer(&secp);
             let signed = signing::sign(p, &agent_master, &secp).unwrap();
-            process_request(&st, Request::Sign { psbt: psbt_base64(&signed) })
+            process_request(
+                &st,
+                Request::Sign {
+                    psbt: psbt_base64(&signed),
+                },
+            )
         };
         // ~51k each: two auto-sign (102k cumulative), the third crosses 120k -> tap.
-        assert!(matches!(push(50_000), Response::Signed { .. }), "1st in-policy");
-        assert!(matches!(push(50_001), Response::Signed { .. }), "2nd in-policy");
+        assert!(
+            matches!(push(50_000), Response::Signed { .. }),
+            "1st in-policy"
+        );
+        assert!(
+            matches!(push(50_001), Response::Signed { .. }),
+            "2nd in-policy"
+        );
         match push(50_002) {
             Response::Pending { .. } => {}
             o => panic!("3rd should trip the daily cap and require a tap, got {o:?}"),
@@ -3775,11 +4446,19 @@ mod tests {
         let big = build_demo_psbt(&[0x11; 32], &Secp256k1::new(), fp, &reg, 500_000).unwrap();
         let txid = big.unsigned_tx.compute_txid().to_string();
         st.lock().unwrap().signing_in_flight.insert(txid.clone()); // pretend on_approve is mid-sign
-        match process_request(&st, Request::Sign { psbt: psbt_base64(&big) }) {
+        match process_request(
+            &st,
+            Request::Sign {
+                psbt: psbt_base64(&big),
+            },
+        ) {
             Response::Pending { .. } => {}
             o => panic!("expected Pending, got {o:?}"),
         }
-        assert!(st.lock().unwrap().pending_queue.is_empty(), "in-flight txid must not re-queue");
+        assert!(
+            st.lock().unwrap().pending_queue.is_empty(),
+            "in-flight txid must not re-queue"
+        );
     }
 
     // Log dedup must scan the whole ledger, not just the last 200 rows.
@@ -3791,14 +4470,31 @@ mod tests {
             let mut g = st.lock().unwrap();
             for i in 0..250u64 {
                 g.history.record(history::SpendRecord {
-                    unix_time: i, amount_sats: 1, dest: "d".into(),
-                    kind: history::SignKind::External, txid: format!("old{i}"), wallet: String::new(), wallet_id: String::new(),
+                    unix_time: i,
+                    amount_sats: 1,
+                    dest: "d".into(),
+                    kind: history::SignKind::External,
+                    txid: format!("old{i}"),
+                    wallet: String::new(),
+                    wallet_id: String::new(),
                 });
             }
         }
         let before = st.lock().unwrap().history.len();
-        let _ = process_request(&st, Request::Log { amount_sats: 1, dest: "d".into(), txid: "old0".into(), wallet: String::new() });
-        assert_eq!(st.lock().unwrap().history.len(), before, "txid older than recent(200) still deduped");
+        let _ = process_request(
+            &st,
+            Request::Log {
+                amount_sats: 1,
+                dest: "d".into(),
+                txid: "old0".into(),
+                wallet: String::new(),
+            },
+        );
+        assert_eq!(
+            st.lock().unwrap().history.len(),
+            before,
+            "txid older than recent(200) still deduped"
+        );
     }
 
     // signed_cache is bounded: oldest entries evict, newest survive.
@@ -3809,19 +4505,35 @@ mod tests {
         for i in 0..(SIGNED_CACHE_MAX + 50) {
             g.cache_signed(format!("tx{i}"), vec![0u8; 4]);
         }
-        assert!(g.signed_cache.len() <= SIGNED_CACHE_MAX, "cache stays bounded");
-        assert_eq!(g.signed_cache.len(), g.signed_cache_order.len(), "map + order stay in sync");
+        assert!(
+            g.signed_cache.len() <= SIGNED_CACHE_MAX,
+            "cache stays bounded"
+        );
+        assert_eq!(
+            g.signed_cache.len(),
+            g.signed_cache_order.len(),
+            "map + order stay in sync"
+        );
         assert!(!g.signed_cache.contains_key("tx0"), "oldest evicted");
-        assert!(g.signed_cache.contains_key(&format!("tx{}", SIGNED_CACHE_MAX + 49)), "newest kept");
+        assert!(
+            g.signed_cache
+                .contains_key(&format!("tx{}", SIGNED_CACHE_MAX + 49)),
+            "newest kept"
+        );
     }
 
     #[test]
     fn xpub_at_arbitrary_path_has_origin() {
         let (secp, _x, fp) = device();
-        let k48 = xpub_with_origin_at(&[0x11; 32], &secp, fp, Network::Testnet, "m/48'/1'/0'/2'").unwrap();
-        assert!(k48.starts_with(&format!("[{fp}/48'/1'/0'/2']")), "got: {k48}");
+        let k48 = xpub_with_origin_at(&[0x11; 32], &secp, fp, Network::Testnet, "m/48'/1'/0'/2'")
+            .unwrap();
+        assert!(
+            k48.starts_with(&format!("[{fp}/48'/1'/0'/2']")),
+            "got: {k48}"
+        );
         assert!(k48.contains("tpub"));
-        let k84 = xpub_with_origin_at(&[0x11; 32], &secp, fp, Network::Testnet, "m/84'/1'/0'").unwrap();
+        let k84 =
+            xpub_with_origin_at(&[0x11; 32], &secp, fp, Network::Testnet, "m/84'/1'/0'").unwrap();
         assert!(k84.starts_with(&format!("[{fp}/84'/1'/0']")), "got: {k84}");
         assert_ne!(k48, k84, "different paths -> different xpubs");
     }
@@ -3835,12 +4547,22 @@ mod tests {
         let parsed = descriptor::import(REAL).expect("real nunchuk 2-of-3 imports");
         assert_eq!(parsed.checksum, "w89kvwwv");
         let prime = Fingerprint::from_str("d38570d3").unwrap();
-        let reg = policy::build_registered_policy("real", "Agent Wallet", "testnet", &parsed, prime).unwrap();
+        let reg =
+            policy::build_registered_policy("real", "Agent Wallet", "testnet", &parsed, prime)
+                .unwrap();
         assert_eq!(reg.paths.len(), 1, "single 2-of-3 primary path");
         assert_eq!((reg.paths[0].threshold, reg.paths[0].total_keys), (2, 3));
         assert_eq!(reg.signers.len(), 3, "agent + prime + platform key");
-        assert!(reg.signers.iter().any(|x| x.fingerprint == "d38570d3" && x.owned_by_passport), "Prime owns its slot");
-        assert!(reg.signers.iter().any(|x| x.fingerprint == "ecfed4c1"), "Nunchuk Platform Key present");
+        assert!(
+            reg.signers
+                .iter()
+                .any(|x| x.fingerprint == "d38570d3" && x.owned_by_passport),
+            "Prime owns its slot"
+        );
+        assert!(
+            reg.signers.iter().any(|x| x.fingerprint == "ecfed4c1"),
+            "Nunchuk Platform Key present"
+        );
     }
 
     #[test]
@@ -3855,7 +4577,10 @@ mod tests {
         assert_eq!(m.active_path, Some(SpendPathKind::Primary));
         let master = master_for_network(&seed, DEFAULT_NETWORK).unwrap();
         let signed = signing::sign(psbt, &master, &secp).unwrap();
-        assert!(!signing::is_finalizable(&signed, &secp), "2-of-2 needs the agent sig too");
+        assert!(
+            !signing::is_finalizable(&signed, &secp),
+            "2-of-2 needs the agent sig too"
+        );
     }
 
     #[test]
@@ -3882,7 +4607,10 @@ mod tests {
         let hist = history::SpendHistory::new();
         let small = build_demo_psbt(&seed, &secp, fp, &reg, 50_000).unwrap();
         let of = lpsbt::outflow_sats(&small, &reg, GAP).unwrap();
-        assert_eq!(gate::decide(&pol, &hist, of, 1_000_000), gate::Decision::AutoSign);
+        assert_eq!(
+            gate::decide(&pol, &hist, of, 1_000_000),
+            gate::Decision::AutoSign
+        );
         let large = build_demo_psbt(&seed, &secp, fp, &reg, 200_000).unwrap();
         let ofl = lpsbt::outflow_sats(&large, &reg, GAP).unwrap();
         assert!(gate::decide(&pol, &hist, ofl, 1_000_000).requires_approval());

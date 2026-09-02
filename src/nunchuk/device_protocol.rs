@@ -58,27 +58,49 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "result", rename_all = "snake_case")]
 pub enum Response {
-    Fingerprint { fingerprint: String },
-    Key { key: String },
-    Signed { psbt: String },
+    Fingerprint {
+        fingerprint: String,
+    },
+    Key {
+        key: String,
+    },
+    Signed {
+        psbt: String,
+    },
     /// Over-policy or recovery: the device is holding it for an on-device approval.
-    Pending { reason: String },
-    Address { address: String },
+    Pending {
+        reason: String,
+    },
+    Address {
+        address: String,
+    },
     /// A descriptor was enrolled: Prime now recognises this wallet.
-    Registered { name: String, checksum: String },
+    Registered {
+        name: String,
+        checksum: String,
+    },
     /// An agent-reported spend was recorded in the activity log.
-    Logged { txid: String },
+    Logged {
+        txid: String,
+    },
     /// The onboarding setup the user chose. `model` is `"2-of-2"` (self-custodied,
     /// agent + Passport) or `"2-of-3"` (adds Nunchuk's Platform Key). `recovery_blocks`
     /// is the relative-timelock recommendation for the Passport-alone recovery leg
     /// (a 2-of-2 feature; ignore for 2-of-3, which self-recovers).
-    Spec { model: String, recovery_blocks: u32 },
-    Error { message: String },
+    Spec {
+        model: String,
+        recovery_blocks: u32,
+    },
+    Error {
+        message: String,
+    },
 }
 
 impl Response {
     pub fn error(msg: impl Into<String>) -> Self {
-        Response::Error { message: msg.into() }
+        Response::Error {
+            message: msg.into(),
+        }
     }
 
     /// Parse a request from one JSON line.
@@ -88,7 +110,8 @@ impl Response {
 
     /// Serialize a response as one JSON line (no trailing newline).
     pub fn to_line(&self) -> Vec<u8> {
-        serde_json::to_vec(self).unwrap_or_else(|_| b"{\"result\":\"error\",\"message\":\"serialize\"}".to_vec())
+        serde_json::to_vec(self)
+            .unwrap_or_else(|_| b"{\"result\":\"error\",\"message\":\"serialize\"}".to_vec())
     }
 }
 
@@ -100,11 +123,25 @@ mod tests {
     fn request_json_roundtrip() {
         let cases = [
             Request::Fingerprint,
-            Request::Xpub { path: "m/48'/1'/0'/2'".into() },
-            Request::Sign { psbt: "cHNidP8B".into() },
-            Request::Showaddr { index: 0, change: false },
-            Request::Register { descriptor: "wsh(sortedmulti(2,...))#abcd".into() },
-            Request::Log { amount_sats: 12_345, dest: "tb1qxyz".into(), txid: "deadbeef".into(), wallet: "Agent Wallet".into() },
+            Request::Xpub {
+                path: "m/48'/1'/0'/2'".into(),
+            },
+            Request::Sign {
+                psbt: "cHNidP8B".into(),
+            },
+            Request::Showaddr {
+                index: 0,
+                change: false,
+            },
+            Request::Register {
+                descriptor: "wsh(sortedmulti(2,...))#abcd".into(),
+            },
+            Request::Log {
+                amount_sats: 12_345,
+                dest: "tb1qxyz".into(),
+                txid: "deadbeef".into(),
+                wallet: "Agent Wallet".into(),
+            },
             Request::Spec,
         ];
         for c in cases {
@@ -118,28 +155,41 @@ mod tests {
     fn parses_concrete_wire_lines() {
         assert_eq!(
             Response::parse_request(br#"{"cmd":"xpub","path":"m/84'/1'/0'"}"#).unwrap(),
-            Request::Xpub { path: "m/84'/1'/0'".into() }
+            Request::Xpub {
+                path: "m/84'/1'/0'".into()
+            }
         );
         assert_eq!(
             Response::parse_request(br#"{"cmd":"fingerprint"}"#).unwrap(),
             Request::Fingerprint
         );
-        assert_eq!(Response::parse_request(br#"{"cmd":"spec"}"#).unwrap(), Request::Spec);
+        assert_eq!(
+            Response::parse_request(br#"{"cmd":"spec"}"#).unwrap(),
+            Request::Spec
+        );
         // change defaults to false when omitted
         assert_eq!(
             Response::parse_request(br#"{"cmd":"showaddr","index":3}"#).unwrap(),
-            Request::Showaddr { index: 3, change: false }
+            Request::Showaddr {
+                index: 3,
+                change: false
+            }
         );
     }
 
     #[test]
     fn bad_request_is_an_error_response() {
-        assert!(matches!(Response::parse_request(b"not json"), Err(Response::Error { .. })));
+        assert!(matches!(
+            Response::parse_request(b"not json"),
+            Err(Response::Error { .. })
+        ));
     }
 
     #[test]
     fn response_lines() {
-        let r = Response::Key { key: "[d38570d3/48'/1'/0'/2']tpub".into() };
+        let r = Response::Key {
+            key: "[d38570d3/48'/1'/0'/2']tpub".into(),
+        };
         let line = r.to_line();
         let s = String::from_utf8(line).unwrap();
         assert!(s.contains("\"result\":\"key\""));

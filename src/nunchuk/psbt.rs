@@ -180,8 +180,13 @@ pub fn match_psbt(
     // *right now* — the primary path always, plus any recovery tier the
     // nSequence has unlocked. A key on a not-yet-matured tier cannot sign.
     let passport_in_psbt = psbt.inputs.iter().any(|inp| {
-        inp.bip32_derivation.values().any(|(fp, _)| *fp == passport_fp)
-            || inp.tap_key_origins.values().any(|(_, (fp, _))| *fp == passport_fp)
+        inp.bip32_derivation
+            .values()
+            .any(|(fp, _)| *fp == passport_fp)
+            || inp
+                .tap_key_origins
+                .values()
+                .any(|(_, (fp, _))| *fp == passport_fp)
     });
     let fp_str = passport_fp.to_string();
     let owns_active_key = policy.paths.iter().any(|p| {
@@ -196,8 +201,10 @@ pub fn match_psbt(
     });
     let passport_can_sign = passport_in_psbt && owns_active_key;
     if !passport_can_sign {
-        reasons
-            .push("Passport key is not on a currently-spendable path (or not referenced by the PSBT)".into());
+        reasons.push(
+            "Passport key is not on a currently-spendable path (or not referenced by the PSBT)"
+                .into(),
+        );
     }
 
     Ok(MatchResult {
@@ -250,7 +257,10 @@ fn deepest_unlocked_recovery(policy: &RegisteredPolicy, seq_blocks: Option<u32>)
 /// Candidate scriptPubKeys derived from a policy's descriptor (both receive +
 /// change paths, up to `gap` indices). Used to detect which PSBT outputs are
 /// change returning to the wallet.
-pub fn candidate_spks(policy: &RegisteredPolicy, gap: u32) -> Result<HashSet<super::bitcoin::ScriptBuf>> {
+pub fn candidate_spks(
+    policy: &RegisteredPolicy,
+    gap: u32,
+) -> Result<HashSet<super::bitcoin::ScriptBuf>> {
     // No PSBT context here (this checks a scanned address), so a range scan is
     // required — but it shares one secp context instead of one per derivation.
     spks_at(policy, &(0..gap).collect::<Vec<_>>())
@@ -316,8 +326,11 @@ pub fn outgoing_addresses(
 pub fn outflow_sats(psbt: &Psbt, policy: &RegisteredPolicy, gap: u32) -> Result<u64> {
     // Only the change branch counts as "returns to the wallet"; see `change_spks`.
     let candidates = change_spks(policy, &referenced_indices(psbt, gap))?;
-    let total_in: u64 =
-        psbt.inputs.iter().filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat())).sum();
+    let total_in: u64 = psbt
+        .inputs
+        .iter()
+        .filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat()))
+        .sum();
     let change: u64 = psbt
         .unsigned_tx
         .output

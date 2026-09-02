@@ -12,7 +12,7 @@ security::use_api!();
 /// Fetch the 32-byte app seed. Hardware must never fall back to a known key.
 pub fn app_seed() -> Result<[u8; 32], security::AccessDenied> {
     match Security::default().app_seed() {
-        Ok(seed) => Ok(seed),
+        Ok(seed) => Ok(*seed.as_bytes()),
         #[cfg(not(keyos))]
         Err(_) => {
             log::warn!("security.app_seed unavailable; using dev fallback seed");

@@ -16,10 +16,10 @@
 
 pub use ngwallet::bdk_wallet::{bitcoin, miniscript};
 
+pub mod descriptor;
 pub mod device_protocol;
 pub mod gate;
 pub mod history;
-pub mod descriptor;
 pub mod policy;
 pub mod psbt;
 pub mod signing;
@@ -101,5 +101,7 @@ pub struct SpendPath {
 
 impl SpendPath {
     /// Approximate the relative timelock in months (~4380 blocks/month).
-    pub fn approx_months(&self) -> Option<u32> { self.relative_timelock_blocks.map(|b| b / 4380) }
+    pub fn approx_months(&self) -> Option<u32> {
+        self.relative_timelock_blocks.map(|b| b / 4380)
+    }
 }

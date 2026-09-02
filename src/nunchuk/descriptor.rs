@@ -44,7 +44,11 @@ pub fn import(text: &str) -> Result<ParsedDescriptor> {
         .ok_or_else(|| Error::Parse("descriptor has no checksum".into()))?
         .to_string();
 
-    Ok(ParsedDescriptor { descriptor, checksum, canonical })
+    Ok(ParsedDescriptor {
+        descriptor,
+        checksum,
+        canonical,
+    })
 }
 
 fn kind_name(d: &Descriptor<DescriptorPublicKey>) -> &'static str {

@@ -162,7 +162,12 @@ impl Decision {
 /// Decide whether `amount_sats` (net outflow + fee) may be auto-signed under
 /// `policy`, given `history` and the current time `now` (epoch secs; ignored when
 /// the clock is untrusted). Returns the binding cap if approval is needed.
-pub fn decide(policy: &SpendPolicy, history: &SpendHistory, amount_sats: u64, now: u64) -> Decision {
+pub fn decide(
+    policy: &SpendPolicy,
+    history: &SpendHistory,
+    amount_sats: u64,
+    now: u64,
+) -> Decision {
     // Per-tx is always enforced (no clock needed).
     if amount_sats > policy.per_tx_limit_sats {
         return approval(
@@ -178,13 +183,23 @@ pub fn decide(policy: &SpendPolicy, history: &SpendHistory, amount_sats: u64, no
         if let Some(cap) = policy.daily_cap_sats {
             let spent = history.spent_in_window(now, DAY_SECS);
             if spent.saturating_add(amount_sats) > cap {
-                return approval(CapKind::Daily, spent + amount_sats, cap, "would exceed the 24-hour cap");
+                return approval(
+                    CapKind::Daily,
+                    spent + amount_sats,
+                    cap,
+                    "would exceed the 24-hour cap",
+                );
             }
         }
         if let Some(cap) = policy.weekly_cap_sats {
             let spent = history.spent_in_window(now, WEEK_SECS);
             if spent.saturating_add(amount_sats) > cap {
-                return approval(CapKind::Weekly, spent + amount_sats, cap, "would exceed the 7-day cap");
+                return approval(
+                    CapKind::Weekly,
+                    spent + amount_sats,
+                    cap,
+                    "would exceed the 7-day cap",
+                );
             }
         }
     }
@@ -193,13 +208,23 @@ pub fn decide(policy: &SpendPolicy, history: &SpendHistory, amount_sats: u64, no
     if let Some(cap) = policy.session_cap_sats {
         let spent = history.spent_this_session();
         if spent.saturating_add(amount_sats) > cap {
-            return approval(CapKind::Session, spent + amount_sats, cap, "would exceed this session's cap");
+            return approval(
+                CapKind::Session,
+                spent + amount_sats,
+                cap,
+                "would exceed this session's cap",
+            );
         }
     }
     if let Some(cap) = policy.lifetime_cap_sats {
         let spent = history.total();
         if spent.saturating_add(amount_sats) > cap {
-            return approval(CapKind::Lifetime, spent + amount_sats, cap, "would exceed the lifetime cap");
+            return approval(
+                CapKind::Lifetime,
+                spent + amount_sats,
+                cap,
+                "would exceed the lifetime cap",
+            );
         }
     }
 
@@ -240,7 +265,11 @@ pub fn remaining_budget(
 fn approval(cap: CapKind, would_be: u64, limit: u64, why: &str) -> Decision {
     Decision::RequireApproval {
         cap,
-        reason: format!("{why} ({} > {} sats)", with_commas(would_be), with_commas(limit)),
+        reason: format!(
+            "{why} ({} > {} sats)",
+            with_commas(would_be),
+            with_commas(limit)
+        ),
     }
 }
 
@@ -317,7 +346,11 @@ mod tests {
         let p = policy();
         // Three 90k spends today = 270k; a fourth 90k would hit 360k > 300k daily.
         let now = 1_000_000;
-        let h = hist(&[(now - 100, 90_000), (now - 200, 90_000), (now - 300, 90_000)]);
+        let h = hist(&[
+            (now - 100, 90_000),
+            (now - 200, 90_000),
+            (now - 300, 90_000),
+        ]);
         match decide(&p, &h, 90_000, now) {
             Decision::RequireApproval { cap, .. } => assert_eq!(cap, CapKind::Daily),
             d => panic!("expected daily-cap approval, got {d:?}"),
@@ -340,7 +373,13 @@ mod tests {
         let now = 1_000_000;
         // 5x 90k = 450k in-window history; daily cap of 300k would normally trip,
         // but with no clock the daily cap is NOT enforced.
-        let h = hist(&[(0, 90_000), (0, 90_000), (0, 90_000), (0, 90_000), (0, 90_000)]);
+        let h = hist(&[
+            (0, 90_000),
+            (0, 90_000),
+            (0, 90_000),
+            (0, 90_000),
+            (0, 90_000),
+        ]);
         // Session cap (500k) IS enforced and 450k + 90k = 540k > 500k -> approval.
         match decide(&p, &h, 90_000, now) {
             Decision::RequireApproval { cap, .. } => assert_eq!(cap, CapKind::Session),
@@ -372,7 +411,11 @@ mod tests {
         p.lifetime_cap_sats = Some(1_000_000);
         let h = hist(&[(0, 100_000)]); // 100k spent
         let (cap, spent, limit, rem) = remaining_budget(&p, &h, 0).unwrap();
-        assert_eq!(cap, CapKind::Session, "session (400k left) is tighter than lifetime (900k)");
+        assert_eq!(
+            cap,
+            CapKind::Session,
+            "session (400k left) is tighter than lifetime (900k)"
+        );
         assert_eq!((spent, limit, rem), (100_000, 500_000, 400_000));
     }
 

@@ -52,6 +52,7 @@ slint-keyos-platform-build = { path = ".foundation-sdk/current/lib/keyos/slint-k
 # Without this, cargo resolves Slint from crates.io and a second Slint ABI
 # enters the build alongside the SDK's.
 [patch.crates-io]
+getrandom = { path = ".foundation-sdk/current/lib/keyos/imports/getrandom" }
 slint = { path = ".foundation-sdk/current/lib/slint/api/rs/slint" }
 slint-build = { path = ".foundation-sdk/current/lib/slint/api/rs/build" }
 slint-macros = { path = ".foundation-sdk/current/lib/slint/api/rs/macros" }

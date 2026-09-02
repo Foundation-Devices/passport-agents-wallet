@@ -59,16 +59,15 @@ No KeyOS source checkout required:
 ```bash
 git clone https://github.com/Foundation-Devices/passport-agents-wallet
 cd passport-agents-wallet
-./scripts/setup-sdk.sh          # map your installed SDK into the project (once)
-foundation develop              # SDK dev shell (supplies the required rustc)
+foundation doctor               # verify SDK, toolchain, and app metadata
 foundation sim                  # build + run in the simulator
 ```
 
 To put it on hardware (Passport Prime on KeyOS 1.4):
 
 ```bash
-foundation cert gen             # one-time signing identity
-foundation sideload             # build + sign + copy to the device + launch
+foundation pack --release       # create the installable .app archive
+foundation sideload             # optional: install on a connected device
 ```
 
 Full details, including the SDK version gotcha, in [`SDK-SETUP.md`](SDK-SETUP.md).
@@ -146,7 +145,6 @@ and the CDC transport was retired, so the host lane needs the qlv2 work in
 Known limitations / outstanding:
 
 - **testnet4 only** for now (what Nunchuk's backend supports).
-- **i18n:** strings are inline in the Slint pages; `i18n/en.json` is not yet wired through.
 - **Rolling daily/weekly caps** need an on-device RTC and are paused on hardware today;
   the session/lifetime backstops work.
 - **Recovery-leg signing** (2-of-2, account `1'`, for an actual sweep) is not yet verified

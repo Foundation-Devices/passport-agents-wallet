@@ -14,6 +14,7 @@ theme = "resources/theme.json"
 app-id = "0x6e756e6368756b2d7369676e2d617070"
 version = "0.2.0"
 min-keyos-version = "1.4.0"
+signing-identity = "passport-prime-dev"
 
 [publisher]
 name = "Foundation Devices"

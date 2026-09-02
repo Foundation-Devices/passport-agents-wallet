@@ -154,6 +154,7 @@ export component Input inherits Rectangle {
     in property <string> accept-button-text;
     callback accepted(string);
     callback edited(string);
+    forward-focus: ui-input;
     height: Theme.control-size-md;
 
     ui-input := UiInput {
@@ -198,8 +199,7 @@ export component TitledInput inherits VerticalLayout {
     // Accent colour for the focus ring. Accepted for call-site compatibility;
     // the underlying UI2 Input owns its own focus styling.
     in property <brush> focus-border-color;
-    // Forwarded so call sites can open the keypad on init: `x.focus()`.
-    public function focus() { input.focus(); }
+    forward-focus: input;
     callback edited(string);
     callback accepted(string);
     spacing: Size.sz2;

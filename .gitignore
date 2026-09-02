@@ -8,9 +8,6 @@
 /manifest.toml
 /ui/ui
 /ui/gen
-/resources/fonts
-/resources/icons
-/resources/images
 
 # Editor / OS cruft
 .DS_Store

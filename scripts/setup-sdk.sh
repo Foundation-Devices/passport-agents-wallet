@@ -16,18 +16,9 @@ SDK="${1:-$DEFAULT_SDK}"
 
 [ -d "$SDK/lib/keyos" ] || { echo "error: no SDK at $SDK (expected $SDK/lib/keyos)"; exit 1; }
 
-mkdir -p .foundation-sdk/current/lib .foundation-sdk/current/ui
-ln -sfn "$SDK/lib/keyos"  .foundation-sdk/current/lib/keyos
-ln -sfn "$SDK/lib/slint"  .foundation-sdk/current/lib/slint
-ln -sfn "$SDK/ui/ui"      .foundation-sdk/current/ui/ui
-ln -sfn "$SDK/resources"  .foundation-sdk/current/resources
-
-# Shared UI components + assets the Slint build and app-config reference.
-ln -sfn "$SDK/ui/ui"            ui/ui
-mkdir -p resources
-ln -sfn "$SDK/resources/fonts"  resources/fonts
-ln -sfn "$SDK/resources/icons"  resources/icons
-ln -sfn "$SDK/resources/images" resources/images
+mkdir -p .foundation-sdk ui
+ln -sfn "$SDK" .foundation-sdk/current
+ln -sfn "$SDK/ui/ui" ui/ui
 
 echo "SDK mapped: $SDK"
 echo "Next: foundation sim   (or: cargo check)"
