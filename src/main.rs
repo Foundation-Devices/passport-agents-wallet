@@ -668,7 +668,7 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 // Security gate (defence-in-depth): refuse unless the PSBT matched the
                 // policy and Passport owns a key on the active path.
                 if let signing::SignDecision::Refuse(reason) =
-                    signing::decide(&pending.matched, &pending.policy)
+                    signing::decide(&pending.psbt, &pending.matched, &pending.policy)
                 {
                     ui.global::<Callbacks>().set_signing(false);
                     set_status(&ui, &trfmt(TrId::ErrorRefused, &[&reason]));
@@ -3711,7 +3711,7 @@ mod tests {
 
         // The decision gate must allow, and signing must finalize.
         assert!(matches!(
-            signing::decide(&m, &reg),
+            signing::decide(&psbt, &m, &reg),
             signing::SignDecision::Allow {
                 path: SpendPathKind::Primary,
                 ..
@@ -3863,7 +3863,7 @@ mod tests {
         assert!(m.passport_can_sign, "Prime owns the recovery key");
         // Recovery always demands explicit confirmation (never silent).
         assert!(matches!(
-            signing::decide(&m, &reg),
+            signing::decide(&psbt, &m, &reg),
             signing::SignDecision::Allow {
                 requires_confirmation: true,
                 ..
