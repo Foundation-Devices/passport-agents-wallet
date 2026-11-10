@@ -76,10 +76,23 @@ impl SpendHistory {
         self.session_start = self.records.len();
     }
 
-    /// Append a record. The caller MUST persist before releasing the signature.
-    /// Drop duplicate-txid records (keep the first), repairing ledgers written before
-    /// idempotent signing landed. Order-preserving.
+    /// Was this record signed by the device itself (and so counts toward the caps)?
+    fn device_signed(r: &SpendRecord) -> bool {
+        matches!(r.kind, SignKind::Auto | SignKind::Approved)
+    }
+
+    /// Drop duplicate-txid records, repairing ledgers written before idempotent
+    /// signing landed. Order-preserving. Where the device signed a txid, its own
+    /// record wins over any host-logged `External` row for it (SFT-8638): keeping
+    /// the first-seen row would let a host pre-log a txid and erase the device's
+    /// debit on the next boot. Otherwise the first record per txid is kept.
     pub fn dedup_by_txid(&mut self) {
+        let device_txids: std::collections::HashSet<String> = self
+            .records
+            .iter()
+            .filter(|r| Self::device_signed(r))
+            .map(|r| r.txid.clone())
+            .collect();
         let mut seen = std::collections::HashSet::new();
         self.records.retain(|r| {
             // Never dedup Declined rows: an attempt can be declined once and later
@@ -88,11 +101,22 @@ impl SpendHistory {
             if matches!(r.kind, SignKind::Declined) {
                 return true;
             }
+            if matches!(r.kind, SignKind::External) && device_txids.contains(&r.txid) {
+                return false;
+            }
             seen.insert(r.txid.clone())
         });
     }
 
+    /// Append a record. The caller MUST persist before releasing the signature.
+    /// A device-signed record replaces any host-logged `External` row for the same
+    /// txid, so the debit is never shadowed by an unverified report (SFT-8638).
     pub fn record(&mut self, r: SpendRecord) {
+        if Self::device_signed(&r) {
+            let txid = r.txid.clone();
+            self.records
+                .retain(|x| !(matches!(x.kind, SignKind::External) && x.txid == txid));
+        }
         self.records.push(r);
     }
 
@@ -331,5 +355,64 @@ mod tests {
         assert_eq!(r.len(), 2);
         assert_eq!(r[0].txid, "tx3");
         assert_eq!(r[1].txid, "tx2");
+    }
+
+    fn rec_tx(txid: &str, amt: u64, kind: SignKind) -> SpendRecord {
+        SpendRecord {
+            unix_time: 0,
+            amount_sats: amt,
+            dest: "tb1qdest".into(),
+            kind,
+            txid: txid.into(),
+            wallet: String::new(),
+            wallet_id: String::new(),
+        }
+    }
+
+    /// SFT-8638: a host pre-logs txid T as External, then the device signs T.
+    /// The device's debit must survive both recording and a reboot's dedup.
+    #[test]
+    fn host_logged_external_cannot_erase_device_debit() {
+        let mut h = SpendHistory::new();
+        h.record(rec_tx("T", 2_000_000, SignKind::External));
+        assert_eq!(h.total(), 0, "External never counts");
+        h.record(rec_tx("T", 2_000_000, SignKind::Auto));
+        assert_eq!(h.total(), 2_000_000);
+        assert_eq!(h.len(), 1, "device record replaces the External row");
+
+        // Reboot: reload + dedup must keep the debit.
+        h.dedup_by_txid();
+        h.begin_session();
+        assert_eq!(h.total(), 2_000_000);
+    }
+
+    /// Ledgers written before the fix can hold [External T, Auto T]; dedup at boot
+    /// must keep the device's row, not the first-seen one.
+    #[test]
+    fn dedup_prefers_device_signed_over_external() {
+        let mut h = SpendHistory::new();
+        h.records.push(rec_tx("T", 2_000_000, SignKind::External));
+        h.records.push(rec_tx("T", 2_000_000, SignKind::Approved));
+        h.records.push(rec_tx("U", 500, SignKind::External)); // unrelated external stays
+        h.records.push(rec_tx("T", 0, SignKind::Declined)); // audit rows stay
+        h.dedup_by_txid();
+        assert_eq!(h.total(), 2_000_000);
+        assert!(h
+            .records
+            .iter()
+            .all(|r| !(r.txid == "T" && matches!(r.kind, SignKind::External))));
+        assert!(h.records.iter().any(|r| r.txid == "U"));
+        assert!(h.records.iter().any(|r| matches!(r.kind, SignKind::Declined)));
+    }
+
+    /// Plain duplicates of the same kind still collapse to the first record.
+    #[test]
+    fn dedup_still_drops_plain_duplicates() {
+        let mut h = SpendHistory::new();
+        h.records.push(rec_tx("T", 1_000, SignKind::Auto));
+        h.records.push(rec_tx("T", 1_000, SignKind::Auto));
+        h.dedup_by_txid();
+        assert_eq!(h.len(), 1);
+        assert_eq!(h.total(), 1_000);
     }
 }

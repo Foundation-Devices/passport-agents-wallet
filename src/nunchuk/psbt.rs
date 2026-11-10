@@ -320,23 +320,72 @@ pub fn outgoing_addresses(
     Ok(out)
 }
 
+/// Input amounts, each proven against the full previous transaction (SFT-8253).
+///
+/// A SegWit v0 signature commits only to its own input's amount, so a host that
+/// understates `witness_utxo.value` on different inputs in different signing
+/// rounds can combine the valid per-input signatures into a transaction that
+/// spends far more than the caps saw. Each input must therefore carry
+/// `non_witness_utxo` whose txid is the outpoint being spent; the amount comes
+/// from that transaction's output, and any `witness_utxo` must match it exactly.
+/// Nunchuk attaches the previous transaction to every input (like Bitcoin Core's
+/// `FillPsbt`). Anything missing or inconsistent is an error: fail closed.
+pub fn verified_input_values(psbt: &Psbt) -> Result<Vec<u64>> {
+    let txins = &psbt.unsigned_tx.input;
+    if psbt.inputs.len() != txins.len() || txins.is_empty() {
+        return Err(super::Error::Match("PSBT input count mismatch".into()));
+    }
+    let mut values = Vec::with_capacity(txins.len());
+    for (i, (input, txin)) in psbt.inputs.iter().zip(txins).enumerate() {
+        let prev = input.non_witness_utxo.as_ref().ok_or_else(|| {
+            super::Error::Match(format!(
+                "input {i}: missing previous transaction (cannot verify its amount)"
+            ))
+        })?;
+        let outpoint = txin.previous_output;
+        if prev.compute_txid() != outpoint.txid {
+            return Err(super::Error::Match(format!(
+                "input {i}: previous transaction does not match the outpoint"
+            )));
+        }
+        let prev_out = usize::try_from(outpoint.vout)
+            .ok()
+            .and_then(|v| prev.output.get(v))
+            .ok_or_else(|| {
+                super::Error::Match(format!("input {i}: outpoint index not in previous transaction"))
+            })?;
+        if let Some(wu) = input.witness_utxo.as_ref() {
+            if wu != prev_out {
+                return Err(super::Error::Match(format!(
+                    "input {i}: witness_utxo does not match the previous transaction"
+                )));
+            }
+        }
+        values.push(prev_out.value.to_sat());
+    }
+    Ok(values)
+}
+
 /// Net outflow of a PSBT against a policy: total input value minus change that
 /// returns to the wallet = payment + miner fee, in sats. This is the figure the
 /// spending-policy gate meters (what actually leaves the wallet's control).
+/// Input amounts are verified (`verified_input_values`), and any arithmetic
+/// that doesn't add up is an error, never a zero outflow.
 pub fn outflow_sats(psbt: &Psbt, policy: &RegisteredPolicy, gap: u32) -> Result<u64> {
     // Only the change branch counts as "returns to the wallet"; see `change_spks`.
     let candidates = change_spks(policy, &referenced_indices(psbt, gap))?;
-    let total_in: u64 = psbt
-        .inputs
-        .iter()
-        .filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat()))
-        .sum();
-    let change: u64 = psbt
+    let total_in = verified_input_values(psbt)?
+        .into_iter()
+        .try_fold(0u64, |acc, v| acc.checked_add(v))
+        .ok_or_else(|| super::Error::Match("input total overflows".into()))?;
+    let change = psbt
         .unsigned_tx
         .output
         .iter()
         .filter(|o| candidates.contains(&o.script_pubkey))
-        .map(|o| o.value.to_sat())
-        .sum();
-    Ok(total_in.saturating_sub(change))
+        .try_fold(0u64, |acc, o| acc.checked_add(o.value.to_sat()))
+        .ok_or_else(|| super::Error::Match("change total overflows".into()))?;
+    total_in
+        .checked_sub(change)
+        .ok_or_else(|| super::Error::Match("change exceeds total input".into()))
 }
