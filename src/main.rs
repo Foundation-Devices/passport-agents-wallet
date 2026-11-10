@@ -25,7 +25,7 @@ use gui_permissions::GuiPermissions;
 // Bitcoin types used to build the demo wallet PSBT (+ test fixtures).
 use nunchuk::bitcoin::{
     absolute::LockTime, psbt::Input, transaction::Version, Amount, OutPoint, PublicKey, ScriptBuf,
-    Sequence, Transaction, TxIn, TxOut, Txid, Witness,
+    Sequence, Transaction, TxIn, TxOut, Witness,
 };
 use nunchuk::{
     bitcoin::{
@@ -497,7 +497,18 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
                 let (psbt, matched) = res;
                 match matched {
                     Ok(Some((reg, m))) => {
-                        let outflow = lpsbt::outflow_sats(&psbt, &reg, GAP).unwrap_or(0);
+                        // Fail closed: an unverifiable input amount must never meter as zero.
+                        let outflow = match lpsbt::outflow_sats(&psbt, &reg, GAP) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                review_message(
+                                    &ui,
+                                    &trfmt(TrId::ErrorMatchFailed, &[&format!("{e}")]),
+                                );
+                                ui.global::<Callbacks>().set_psbt_loading(false);
+                                return;
+                            }
+                        };
                         let (decision, can_sign) = {
                             let st = state2.lock().unwrap();
                             (
@@ -1446,7 +1457,15 @@ fn sign_within_policy(st: &mut AppState, psbt: Psbt) -> SignResult {
         };
     }
     let txid = psbt.unsigned_tx.compute_txid().to_string();
-    let outflow = lpsbt::outflow_sats(&psbt, &reg, GAP).unwrap_or(0);
+    // Fail closed: an unverifiable input amount must never meter as zero.
+    let outflow = match lpsbt::outflow_sats(&psbt, &reg, GAP) {
+        Ok(v) => v,
+        Err(e) => {
+            return SignResult::Refused {
+                reason: format!("{e}"),
+            }
+        }
+    };
     let recovery = matches!(m.active_path, Some(SpendPathKind::Recovery));
     let network = network_from_policy(&reg).unwrap_or(DEFAULT_NETWORK);
     // Per-wallet policy + budget: this wallet's override (or the global default) and
@@ -2097,11 +2116,10 @@ fn populate_review(
         .iter()
         .map(|o| o.value.to_sat())
         .sum();
-    let in_sum: u64 = psbt
-        .inputs
-        .iter()
-        .filter_map(|i| i.witness_utxo.as_ref().map(|u| u.value.to_sat()))
-        .sum();
+    // Verified amounts only (the review is shown after outflow_sats passed).
+    let in_sum: u64 = lpsbt::verified_input_values(psbt)
+        .map(|v| v.iter().sum())
+        .unwrap_or(0);
 
     let mut rows: Vec<OutputRow> = Vec::new();
     let mut leaving: u64 = 0;
@@ -2458,9 +2476,11 @@ fn build_owner_psbt(
     let full = DerivationPath::from_str("m/48'/1'/0'/2'/0/0").unwrap();
 
     let value = Amount::from_sat(100_000);
+    // A real funding transaction, so the PSBT carries the previous transaction
+    // the device needs to verify the input amount (SFT-8253).
+    let funding = funding_tx(value, spk.clone());
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-            .unwrap(),
+        txid: funding.compute_txid(),
         vout: 0,
     };
     let tx = Transaction {
@@ -2484,6 +2504,7 @@ fn build_owner_psbt(
             value,
             script_pubkey: spk,
         }),
+        non_witness_utxo: Some(funding),
         witness_script: Some(ws),
         ..Default::default()
     };
@@ -2492,6 +2513,25 @@ fn build_owner_psbt(
         .insert(dev_pk.inner, (device_fp, full));
     psbt.inputs[0] = input;
     Ok(psbt)
+}
+
+/// A one-output transaction paying `value` to `spk`, used as the previous
+/// transaction for demo and test PSBTs so their inputs carry `non_witness_utxo`.
+fn funding_tx(value: Amount, spk: ScriptBuf) -> Transaction {
+    Transaction {
+        version: Version::TWO,
+        lock_time: LockTime::ZERO,
+        input: vec![TxIn {
+            previous_output: OutPoint::null(),
+            script_sig: ScriptBuf::new(),
+            sequence: Sequence::MAX,
+            witness: Witness::new(),
+        }],
+        output: vec![TxOut {
+            value,
+            script_pubkey: spk,
+        }],
+    }
 }
 
 fn policy_summary(p: &RegisteredPolicy) -> String {
@@ -3278,9 +3318,11 @@ fn build_recovery_demo_psbt(
     let rec_full = DerivationPath::from_str(&format!("{}/2/0", account_path(network)))?;
 
     let value = Amount::from_sat(amount + 1_000);
+    // A real funding transaction, so the PSBT carries the previous transaction
+    // the device needs to verify the input amount (SFT-8253).
+    let funding = funding_tx(value, spk.clone());
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-            .unwrap(),
+        txid: funding.compute_txid(),
         vout: 0,
     };
     let tx = Transaction {
@@ -3305,6 +3347,7 @@ fn build_recovery_demo_psbt(
             value,
             script_pubkey: spk,
         }),
+        non_witness_utxo: Some(funding),
         witness_script: Some(ws),
         ..Default::default()
     };
@@ -3345,9 +3388,11 @@ fn build_demo_psbt(
     let full = DerivationPath::from_str(&format!("{}/0/0", account_path(network)))?;
 
     let value = Amount::from_sat(amount + 1_000);
+    // A real funding transaction, so the PSBT carries the previous transaction
+    // the device needs to verify the input amount (SFT-8253).
+    let funding = funding_tx(value, spk.clone());
     let prevout = OutPoint {
-        txid: Txid::from_str("0000000000000000000000000000000000000000000000000000000000000001")
-            .unwrap(),
+        txid: funding.compute_txid(),
         vout: 0,
     };
     let tx = Transaction {
@@ -3371,6 +3416,7 @@ fn build_demo_psbt(
             value,
             script_pubkey: spk,
         }),
+        non_witness_utxo: Some(funding),
         witness_script: Some(ws),
         ..Default::default()
     };
@@ -4119,16 +4165,14 @@ mod tests {
             DerivationPath::from_str(&format!("{}/0/0", account_path(DEFAULT_NETWORK))).unwrap();
         let dead = ScriptBuf::from_hex("0014000000000000000000000000000000000000dead").unwrap();
 
+        let funding = funding_tx(Amount::from_sat(200_000), in_spk.clone());
         let build = |second_spk: ScriptBuf| -> Psbt {
             let tx = Transaction {
                 version: Version::TWO,
                 lock_time: LockTime::ZERO,
                 input: vec![TxIn {
                     previous_output: OutPoint {
-                        txid: Txid::from_str(
-                            "0000000000000000000000000000000000000000000000000000000000000001",
-                        )
-                        .unwrap(),
+                        txid: funding.compute_txid(),
                         vout: 0,
                     },
                     script_sig: ScriptBuf::new(),
@@ -4152,6 +4196,7 @@ mod tests {
                     value: Amount::from_sat(200_000),
                     script_pubkey: in_spk.clone(),
                 }),
+                non_witness_utxo: Some(funding.clone()),
                 witness_script: Some(ws.clone()),
                 ..Default::default()
             };
@@ -4614,5 +4659,85 @@ mod tests {
         let large = build_demo_psbt(&seed, &secp, fp, &reg, 200_000).unwrap();
         let ofl = lpsbt::outflow_sats(&large, &reg, GAP).unwrap();
         assert!(gate::decide(&pol, &hist, ofl, 1_000_000).requires_approval());
+    }
+
+    /// Expand the 1-input demo PSBT to `n` inputs, each spending its own funding
+    /// transaction of `per_input` sats with a matching non_witness_utxo.
+    fn n_input_psbt(n: usize, per_input: u64) -> (Psbt, RegisteredPolicy) {
+        let (secp, _x, fp) = device();
+        let seed = [0x11; 32];
+        let reg = seed_demo_wallet(&seed, &secp, fp, 20, false).unwrap();
+        let mut psbt = build_demo_psbt(&seed, &secp, fp, &reg, 50_000).unwrap();
+        let template_in = psbt.inputs[0].clone();
+        let template_txin = psbt.unsigned_tx.input[0].clone();
+        let spk = template_in.witness_utxo.as_ref().unwrap().script_pubkey.clone();
+        psbt.unsigned_tx.input.clear();
+        psbt.inputs.clear();
+        for k in 0..n {
+            // Distinct funding txids: vary the lock time, keep the amount.
+            let mut funding = funding_tx(Amount::from_sat(per_input), spk.clone());
+            funding.lock_time = LockTime::from_consensus(k as u32);
+            let mut txin = template_txin.clone();
+            txin.previous_output = OutPoint {
+                txid: funding.compute_txid(),
+                vout: 0,
+            };
+            let mut input = template_in.clone();
+            input.witness_utxo = Some(funding.output[0].clone());
+            input.non_witness_utxo = Some(funding);
+            psbt.unsigned_tx.input.push(txin);
+            psbt.inputs.push(input);
+        }
+        (psbt, reg)
+    }
+
+    /// SFT-8253: honest multi-input PSBTs meter the full verified input total;
+    /// understating ANY input's witness_utxo (the multi-round attack) is refused.
+    #[test]
+    fn outflow_verifies_every_input_amount() {
+        for n in [1usize, 2, 4, 8] {
+            let (honest, reg) = n_input_psbt(n, 100_000);
+            assert_eq!(
+                lpsbt::outflow_sats(&honest, &reg, GAP).unwrap(),
+                n as u64 * 100_000,
+                "{n} inputs"
+            );
+            for victim in 0..n {
+                let (mut lied, reg) = n_input_psbt(n, 100_000);
+                lied.inputs[victim].witness_utxo.as_mut().unwrap().value = Amount::from_sat(1);
+                assert!(
+                    lpsbt::outflow_sats(&lied, &reg, GAP).is_err(),
+                    "{n} inputs, understated input {victim} must be refused"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn outflow_refuses_missing_or_mismatched_previous_tx() {
+        let (base, reg) = n_input_psbt(2, 100_000);
+
+        let mut missing = base.clone();
+        missing.inputs[1].non_witness_utxo = None;
+        assert!(lpsbt::outflow_sats(&missing, &reg, GAP).is_err());
+
+        // Previous tx swapped for another one: txid no longer matches the outpoint.
+        let mut swapped = base.clone();
+        swapped.inputs[1].non_witness_utxo = base.inputs[0].non_witness_utxo.clone();
+        assert!(lpsbt::outflow_sats(&swapped, &reg, GAP).is_err());
+
+        // Outpoint index past the previous tx's outputs.
+        let mut bad_vout = base.clone();
+        bad_vout.unsigned_tx.input[0].previous_output.vout = 5;
+        assert!(lpsbt::outflow_sats(&bad_vout, &reg, GAP).is_err());
+    }
+
+    /// The signer path must refuse, not auto-sign at zero, when amounts can't be verified.
+    #[test]
+    fn unverifiable_amounts_never_meter_as_zero() {
+        let (mut psbt, reg) = n_input_psbt(1, 100_000);
+        psbt.inputs[0].non_witness_utxo = None;
+        assert!(lpsbt::outflow_sats(&psbt, &reg, GAP).is_err());
+        assert!(lpsbt::verified_input_values(&psbt).is_err());
     }
 }
