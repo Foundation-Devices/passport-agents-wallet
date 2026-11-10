@@ -34,8 +34,9 @@ use nunchuk::{
         secp256k1::{All, Secp256k1},
         Address, Network,
     },
-    descriptor, device_protocol, gate, history, policy, psbt as lpsbt, signing, store,
-    RegisteredPolicy, SpendPathKind,
+    descriptor, device_protocol, gate, history,
+    miniscript::{DescriptorPublicKey, ForEachKey},
+    policy, psbt as lpsbt, signing, store, RegisteredPolicy, SpendPathKind,
 };
 use slint_keyos_platform::{
     app_ui2,
@@ -2000,33 +2001,102 @@ fn populate_detail(ui: &AppWindow, reg: &RegisteredPolicy) {
     // Number recovery tiers when there is more than one (a decaying policy), so
     // "Recovery path 1 / 2 / 3" disambiguate the cards; a lone recovery stays
     // just "Recovery path".
-    let mut paths: Vec<PathRow> = Vec::with_capacity(reg.paths.len());
+    // Signer roles come from the real keys, not their position (SFT-8185): only the
+    // pinned Nunchuk key is the "Platform Key", and an external key is the "Agent
+    // Key" only when it's the only one.
+    let role_of = signer_roles(reg);
+    let name_of = |fp: &str| -> String {
+        role_of
+            .iter()
+            .find(|(f, _)| f == fp)
+            .map(|(_, r)| r.clone())
+            .unwrap_or_else(|| format!("Key {fp}"))
+    };
+    let has_platform = reg.signers.iter().any(policy::is_pinned_platform_signer);
+    let passport_fps: std::collections::HashSet<&str> = reg
+        .signers
+        .iter()
+        .filter(|s| s.owned_by_passport)
+        .map(|s| s.fingerprint.as_str())
+        .collect();
+    let platform_fps: std::collections::HashSet<&str> = reg
+        .signers
+        .iter()
+        .filter(|s| policy::is_pinned_platform_signer(s))
+        .map(|s| s.fingerprint.as_str())
+        .collect();
+
+    let mut paths: Vec<PathRow> = Vec::with_capacity(reg.paths.len() + 1);
+    let mut warn: Option<String> = None;
     for p in &reg.paths {
         let is_recovery = matches!(p.kind, SpendPathKind::Recovery);
-        // Agent-native copy: this is an agent wallet, not an inheritance wallet.
+        let mut fps: Vec<&str> = Vec::new();
+        for f in &p.signer_fingerprints {
+            if !fps.contains(&f.as_str()) {
+                fps.push(f.as_str());
+            }
+        }
+        let names: Vec<String> = fps.iter().map(|f| name_of(f)).collect();
+        let passport_only = !fps.is_empty() && fps.iter().all(|f| passport_fps.contains(f));
+        // External keys other than the pinned Platform Key: if they alone meet this
+        // path's threshold, the agent can spend without Passport.
+        let agent_keys = fps
+            .iter()
+            .filter(|f| !passport_fps.contains(*f) && !platform_fps.contains(*f))
+            .count();
         let (kind_label, headline, detail) = if is_recovery {
             let n = p.relative_timelock_blocks.unwrap_or(0);
-            (
-                "Recovery".to_string(),
-                format!("Passport alone, after {} blocks", commas(n)),
-                format!(
-                    "If the agent key is lost, Passport can recover the funds on its own once a coin is {} blocks old ({}). Always needs your approval on this device.",
-                    commas(n),
-                    approx_time(n)
-                ),
-            )
-        } else if p.total_keys > 2 {
-            (
-                "Everyday spending".to_string(),
-                format!("Agent + Platform Key ({} of {})", p.threshold, p.total_keys),
-                "Routine spends: the agent and Nunchuk's Platform Key co-sign automatically, within Nunchuk's limit, so the agent keeps running even when Passport is unplugged. Bigger spends route to Passport instead, which co-signs only after you approve them on this device.".to_string(),
-            )
+            if passport_only {
+                (
+                    "Recovery".to_string(),
+                    format!("Passport alone, after {} blocks", commas(n)),
+                    format!(
+                        "If the agent key is lost, Passport can recover the funds on its own once a coin is {} blocks old ({}). Always needs your approval on this device.",
+                        commas(n),
+                        approx_time(n)
+                    ),
+                )
+            } else {
+                warn.get_or_insert_with(|| {
+                    "This wallet's recovery path includes a key other than Passport.".to_string()
+                });
+                (
+                    "Recovery".to_string(),
+                    format!("{}, after {} blocks", names.join(" + "), commas(n)),
+                    format!(
+                        "Needs {} of these {} keys once a coin is {} blocks old ({}).",
+                        p.threshold,
+                        p.total_keys,
+                        commas(n),
+                        approx_time(n)
+                    ),
+                )
+            }
         } else {
-            (
-                "Everyday spending".to_string(),
-                "Agent + Passport".to_string(),
-                "The agent proposes a spend; Passport co-signs. Under your limits Passport signs automatically; over them it asks for your approval on this device. Needs both keys.".to_string(),
-            )
+            if agent_keys >= p.threshold {
+                warn.get_or_insert_with(|| {
+                    "The external keys can spend from this wallet without Passport.".to_string()
+                });
+            }
+            let headline = format!(
+                "{} ({} of {} keys)",
+                names.join(" + "),
+                p.threshold,
+                p.total_keys
+            );
+            let detail = if fps.iter().any(|f| platform_fps.contains(f)) {
+                "Routine spends: the agent and Nunchuk's Platform Key co-sign automatically, within Nunchuk's limit, so the agent keeps running even when Passport is unplugged. Bigger spends route to Passport instead, which co-signs only after you approve them on this device.".to_string()
+            } else if p.threshold == 2 && p.total_keys == 2 && agent_keys == 1 {
+                "The agent proposes a spend; Passport co-signs. Under your limits Passport signs automatically; over them it asks for your approval on this device. Needs both keys.".to_string()
+            } else {
+                format!(
+                    "Needs {} of these {} keys: {}.",
+                    p.threshold,
+                    p.total_keys,
+                    names.join(", ")
+                )
+            };
+            ("Everyday spending".to_string(), headline, detail)
         };
         paths.push(PathRow {
             kind_label: kind_label.into(),
@@ -2035,45 +2105,68 @@ fn populate_detail(ui: &AppWindow, reg: &RegisteredPolicy) {
             detail: detail.into(),
         });
     }
+    if let Some(w) = warn {
+        // Wallets registered before SFT-8185 can still hold such a policy.
+        paths.insert(
+            0,
+            PathRow {
+                kind_label: "Warning".into(),
+                is_recovery: false,
+                headline: w.into(),
+                detail: "Passport didn't approve this wallet's rules. Don't rely on its limits; move the funds to a new wallet.".into(),
+            },
+        );
+    }
     cb.set_detail_paths(ModelRc::new(VecModel::from(paths)));
 
     // One row per distinct key. Prime's xpub appears twice in the descriptor
     // (multisig <0;1> + recovery <2;3>), so dedupe by fingerprint: it is ONE key
     // sitting on two spend paths, not two separate keys.
     let mut seen_fps = std::collections::HashSet::new();
-    let mut external_seen = 0usize;
     let signers: Vec<SignerRow> = reg
         .signers
         .iter()
         .filter(|s| seen_fps.insert(s.fingerprint.clone()))
-        .map(|s| {
-            // Prime = this device. First external key = the agent; a second
-            // external key (2-of-3) = the Nunchuk Platform Key.
-            let role = if s.owned_by_passport {
-                "This Passport".to_string()
-            } else {
-                external_seen += 1;
-                if external_seen == 1 {
-                    "Agent Key".to_string()
-                } else if external_seen == 2 {
-                    "Platform Key".to_string()
-                } else {
-                    // A further external key (e.g. a recovery co-signer the agent added)
-                    // isn't the Platform Key; don't mislabel it.
-                    "Other key".to_string()
-                }
-            };
-            SignerRow {
-                fingerprint: s.fingerprint.clone().into(),
-                owned: s.owned_by_passport,
-                detail: role.into(),
-            }
+        .map(|s| SignerRow {
+            fingerprint: s.fingerprint.clone().into(),
+            owned: s.owned_by_passport,
+            detail: name_of(&s.fingerprint).into(),
         })
         .collect();
-    // Two or more external keys => a Platform Key is present (2-of-3), so Nunchuk
-    // enforces the everyday limit and Prime's policy is the Prime-routed gate.
-    cb.set_detail_has_platform_key(external_seen >= 2);
+    // Only the pinned Nunchuk key means Nunchuk enforces an everyday limit.
+    cb.set_detail_has_platform_key(has_platform);
     cb.set_detail_signers(ModelRc::new(VecModel::from(signers)));
+}
+
+/// (fingerprint, role) for each distinct signer: "This Passport", "Platform Key"
+/// (pinned Nunchuk key only), "Agent Key" (when it's the only other external
+/// key), otherwise "External key".
+fn signer_roles(reg: &RegisteredPolicy) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let distinct: Vec<&nunchuk::PolicySigner> = reg
+        .signers
+        .iter()
+        .filter(|s| seen.insert(s.fingerprint.clone()))
+        .collect();
+    let other_external = distinct
+        .iter()
+        .filter(|s| !s.owned_by_passport && !policy::is_pinned_platform_signer(s))
+        .count();
+    distinct
+        .iter()
+        .map(|s| {
+            let role = if s.owned_by_passport {
+                "This Passport"
+            } else if policy::is_pinned_platform_signer(s) {
+                "Platform Key"
+            } else if other_external == 1 {
+                "Agent Key"
+            } else {
+                "External key"
+            };
+            (s.fingerprint.clone(), role.to_string())
+        })
+        .collect()
 }
 
 fn populate_review(
@@ -2413,7 +2506,56 @@ fn register_descriptor(
     if !text.contains(&dev_xpub) {
         anyhow::bail!("descriptor names a Passport fingerprint but not Passport's actual key");
     }
+    // Every key carrying Passport's fingerprint must really be derived from this
+    // device's seed, so a foreign key can't sit beside the real one posing as
+    // Passport (it would be counted as Passport below and on the detail screen).
+    let master = master_for_network(seed, network)?;
+    let is_passport =
+        |k: &DescriptorPublicKey| passport_owns_key(k, &master, passport_fp, secp);
+    let mut forged = false;
+    parsed.descriptor.for_each_key(|k| {
+        if k.master_fingerprint() == passport_fp && !is_passport(k) {
+            forged = true;
+        }
+        true
+    });
+    if forged {
+        anyhow::bail!("descriptor names a Passport fingerprint but not Passport's actual key");
+    }
+    // SFT-8185: refuse wallets the agent can spend from without Passport (except
+    // through the pinned Nunchuk Platform Key), and recovery paths that aren't
+    // Passport alone, so the device never presents them as co-signed.
+    if let Some(why) = policy::spend_policy_violation(&parsed.descriptor, &is_passport)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+    {
+        anyhow::bail!("Refusing this wallet: {why}.");
+    }
     Ok(reg)
+}
+
+/// Is `k` derived from this device's seed? Re-derives the xpub at the key's own
+/// origin path and compares, so it holds for any account (including a separate
+/// recovery account), not just the default one, and can't be faked with a
+/// fingerprint alone.
+fn passport_owns_key(
+    k: &DescriptorPublicKey,
+    master: &Xpriv,
+    passport_fp: Fingerprint,
+    secp: &Secp256k1<All>,
+) -> bool {
+    if k.master_fingerprint() != passport_fp {
+        return false;
+    }
+    let (origin, xkey) = match k {
+        DescriptorPublicKey::XPub(x) => (x.origin.as_ref(), x.xkey),
+        DescriptorPublicKey::MultiXPub(x) => (x.origin.as_ref(), x.xkey),
+        DescriptorPublicKey::Single(_) => return false,
+    };
+    let Some((_, path)) = origin else { return false };
+    master
+        .derive_priv(secp, path)
+        .map(|child| Xpub::from_priv(secp, &child) == xkey)
+        .unwrap_or(false)
 }
 
 // Test-only fixtures (no longer seeded into the app — placeholder policy removed).
@@ -3265,7 +3407,9 @@ fn seed_demo_wallet(
                                           // + Prime). Recovery key reuses Prime's xpub at <2;3> so its addresses never
                                           // collide with the multisig ones.
     let multi_keys = if with_platform_key {
-        let platform_key = det_key([0x77; 32])?; // stand-in for the Nunchuk Platform Key
+        // The pinned Nunchuk testnet Platform Key (public), so the demo shows it as one.
+        let (pfp, pxpub) = policy::NUNCHUK_PLATFORM_KEYS[0];
+        let platform_key = format!("[{pfp}/48'/1'/197'/2']{pxpub}");
         format!("{agent_key}/<0;1>/*,{dev_key}/<0;1>/*,{platform_key}/<0;1>/*")
     } else {
         format!("{agent_key}/<0;1>/*,{dev_key}/<0;1>/*")
@@ -3808,6 +3952,133 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("not Passport's actual key"), "got: {err}");
+    }
+
+    // --- SFT-8185: registration refuses wallets the agent can spend alone ---
+
+    /// Key string `[fp/path]xpub` derived from `seed` at `path` (e.g. a second
+    /// Passport account), with an optional forged fingerprint.
+    fn key_at(seed: u8, path: &str, fp_override: Option<&str>) -> String {
+        let secp = Secp256k1::new();
+        let m = Xpriv::new_master(DEFAULT_NETWORK, &[seed; 32]).unwrap();
+        let fp = fp_override
+            .map(str::to_string)
+            .unwrap_or_else(|| m.fingerprint(&secp).to_string());
+        let dp = DerivationPath::from_str(path).unwrap();
+        let xpub = Xpub::from_priv(&secp, &m.derive_priv(&secp, &dp).unwrap());
+        format!("[{fp}/{}]{xpub}", path.trim_start_matches("m/"))
+    }
+
+    fn pinned_platform() -> String {
+        let (pfp, pxpub) = policy::NUNCHUK_PLATFORM_KEYS[0];
+        format!("[{pfp}/48'/1'/197'/2']{pxpub}")
+    }
+
+    fn register(desc: &str) -> anyhow::Result<RegisteredPolicy> {
+        let (secp, _x, fp) = device();
+        register_descriptor(desc, fp, &[0x11; 32], &secp)
+    }
+
+    #[test]
+    fn accepts_two_of_two_with_passport_recovery() {
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let desc = format!(
+            "wsh(or_d(multi(2,{agent}/<0;1>/*,{prime}/<0;1>/*),and_v(v:pk({prime}/<2;3>/*),older(1000))))"
+        );
+        register(&desc).expect("standard agent wallet registers");
+    }
+
+    #[test]
+    fn accepts_recovery_on_a_second_passport_account() {
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let rec = key_at(0x11, "m/48'/1'/1'/2'", None);
+        let desc = format!(
+            "wsh(or_d(multi(2,{agent}/<0;1>/*,{prime}/<0;1>/*),and_v(v:pk({rec}/<0;1>/*),older(1000))))"
+        );
+        register(&desc).expect("recovery on Passport's own second account registers");
+    }
+
+    #[test]
+    fn accepts_pinned_platform_two_of_three() {
+        let (agent, prime, platform) = (test_key(0x42), test_key(0x11), pinned_platform());
+        let desc =
+            format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{platform}/<0;1>/*))");
+        let reg = register(&desc).expect("real Nunchuk platform shape registers");
+        let roles = signer_roles(&reg);
+        assert!(roles.iter().any(|(_, r)| r == "Platform Key"));
+        assert!(roles.iter().any(|(_, r)| r == "Agent Key"));
+    }
+
+    #[test]
+    fn rejects_one_of_two_the_agent_can_spend_alone() {
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let desc = format!("wsh(multi(1,{agent}/<0;1>/*,{prime}/<0;1>/*))");
+        let err = register(&desc).unwrap_err().to_string();
+        assert!(err.contains("without Passport"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_agent_key_timelock_branch() {
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let desc = format!(
+            "wsh(or_d(multi(2,{agent}/<0;1>/*,{prime}/<0;1>/*),and_v(v:pk({agent}/<2;3>/*),older(1000))))"
+        );
+        let err = register(&desc).unwrap_err().to_string();
+        assert!(err.contains("without Passport"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_recovery_path_that_isnt_passport_alone() {
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let desc = format!(
+            "wsh(or_d(multi(2,{agent}/<0;1>/*,{prime}/<0;1>/*),and_v(v:multi(2,{prime}/<2;3>/*,{agent}/<2;3>/*),older(1000))))"
+        );
+        let err = register(&desc).unwrap_err().to_string();
+        assert!(err.contains("recovery path"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_platform_shaped_two_of_three_with_unknown_key() {
+        let (agent, prime, other) = (test_key(0x42), test_key(0x11), test_key(0x99));
+        let desc = format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{other}/<0;1>/*))");
+        let err = register(&desc).unwrap_err().to_string();
+        assert!(err.contains("without Passport"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_forged_platform_fingerprint() {
+        // Nunchuk's fingerprint on someone else's key is just another agent key.
+        let (agent, prime) = (test_key(0x42), test_key(0x11));
+        let fake = key_at(0x99, "m/48'/1'/197'/2'", Some("ecfed4c1"));
+        let desc = format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{fake}/<0;1>/*))");
+        let err = register(&desc).unwrap_err().to_string();
+        assert!(err.contains("without Passport"), "got: {err}");
+    }
+
+    #[test]
+    fn rejects_foreign_key_posing_as_passport_beside_the_real_one() {
+        let (secp, _x, fp) = device();
+        let prime = test_key(0x11);
+        let forged = key_at(0xAB, "m/48'/1'/1'/2'", Some(&fp.to_string()));
+        let desc = format!(
+            "wsh(or_d(multi(2,{forged}/<0;1>/*,{prime}/<0;1>/*),and_v(v:pk({prime}/<2;3>/*),older(1000))))"
+        );
+        let err = register_descriptor(&desc, fp, &[0x11; 32], &secp)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not Passport's actual key"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_second_external_key_is_not_labelled_platform() {
+        let (_secp, _x, fp) = device();
+        let (agent, prime, other) = (test_key(0x42), test_key(0x11), test_key(0x99));
+        let desc = format!("wsh(sortedmulti(2,{agent}/<0;1>/*,{prime}/<0;1>/*,{other}/<0;1>/*))");
+        let parsed = descriptor::import(&desc).unwrap();
+        let reg = policy::build_registered_policy("p", "Legacy", "testnet", &parsed, fp).unwrap();
+        let roles = signer_roles(&reg);
+        assert!(roles.iter().all(|(_, r)| r != "Platform Key"));
+        assert_eq!(roles.iter().filter(|(_, r)| r == "External key").count(), 2);
     }
 
     #[test]
