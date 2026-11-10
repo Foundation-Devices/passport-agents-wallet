@@ -124,6 +124,106 @@ fn key_threshold(sem: &Sem) -> (usize, usize) {
     }
 }
 
+/// Nunchuk Platform Keys the device recognises, pinned by master fingerprint AND
+/// full xpub (a fingerprint alone can be claimed by any key). The testnet key was
+/// identical across separate wallets created with nunchuk-cli. Mainnet's isn't
+/// known yet, so a mainnet platform-shaped wallet is refused until it's pinned
+/// here (SFT-8185).
+pub const NUNCHUK_PLATFORM_KEYS: &[(&str, &str)] = &[(
+    "ecfed4c1",
+    "tpubDEq5UeAAAPSFSDxk7tfMQ6uoegUrp8WNY5WpZCPtoj1kw3M23t1M9z12d4fkhre2PdHqHfzU3SfvHeYozY1SUEAASvzJ9qcPuxfwcpD3NZC",
+)];
+
+/// Is this key the pinned Nunchuk Platform Key?
+pub fn is_pinned_platform_key(k: &DescriptorPublicKey) -> bool {
+    let fp = k.master_fingerprint().to_string();
+    let text = k.to_string();
+    NUNCHUK_PLATFORM_KEYS
+        .iter()
+        .any(|(pfp, xpub)| fp == *pfp && text.contains(xpub))
+}
+
+/// Same check on a stored signer row (fingerprint + key string).
+pub fn is_pinned_platform_signer(s: &PolicySigner) -> bool {
+    NUNCHUK_PLATFORM_KEYS
+        .iter()
+        .any(|(pfp, xpub)| s.fingerprint == *pfp && s.xpub.contains(xpub))
+}
+
+/// Could this policy be satisfied using only the keys `avail` accepts? Timelocks
+/// and hashlocks count as satisfiable (worst case: the holder waits, or knows the
+/// preimage), so the answer is about keys alone.
+fn can_satisfy(sem: &Sem, avail: &dyn Fn(&DescriptorPublicKey) -> bool) -> bool {
+    match sem {
+        Semantic::Unsatisfiable => false,
+        Semantic::Trivial => true,
+        Semantic::Key(k) => avail(k),
+        Semantic::After(_)
+        | Semantic::Older(_)
+        | Semantic::Sha256(_)
+        | Semantic::Hash256(_)
+        | Semantic::Ripemd160(_)
+        | Semantic::Hash160(_) => true,
+        Semantic::Thresh(t) => {
+            t.iter().filter(|c| can_satisfy(c.as_ref(), avail)).count() >= t.k()
+        }
+    }
+}
+
+fn all_keys<'a>(sem: &'a Sem, out: &mut Vec<&'a DescriptorPublicKey>) {
+    match sem {
+        Semantic::Key(k) => out.push(k),
+        Semantic::Thresh(t) => t.iter().for_each(|c| all_keys(c.as_ref(), out)),
+        _ => {}
+    }
+}
+
+/// Why this policy can't be presented as Passport-co-signed, if it can't
+/// (SFT-8185). `is_passport` must identify Passport's key by its real xpub, not
+/// just its fingerprint.
+///
+/// * No spend path may be satisfiable by the external keys without Passport,
+///   except through the pinned Nunchuk Platform Key, whose server enforces its
+///   own limit.
+/// * Every timelocked (recovery) path must be Passport's key alone.
+pub fn spend_policy_violation(
+    desc: &Descriptor<DescriptorPublicKey>,
+    is_passport: &dyn Fn(&DescriptorPublicKey) -> bool,
+) -> Result<Option<String>> {
+    let singles = desc
+        .clone()
+        .into_single_descriptors()
+        .map_err(|e| Error::Parse(format!("multipath split: {e}")))?;
+    let first = singles
+        .first()
+        .ok_or_else(|| Error::Parse("descriptor produced no paths".into()))?;
+    let policy = first
+        .lift()
+        .map_err(|e| Error::Parse(format!("lift to policy: {e}")))?;
+
+    let agent_only = |k: &DescriptorPublicKey| !is_passport(k) && !is_pinned_platform_key(k);
+    if can_satisfy(&policy, &agent_only) {
+        return Ok(Some(
+            "the external keys can spend from this wallet without Passport".into(),
+        ));
+    }
+
+    let mut branches: Vec<&Sem> = Vec::new();
+    collect_branches(&policy, &mut branches);
+    for b in branches {
+        if find_older(b).is_some() {
+            let mut keys = Vec::new();
+            all_keys(b, &mut keys);
+            if keys.is_empty() || keys.iter().any(|k| !is_passport(k)) {
+                return Ok(Some(
+                    "a recovery path must be Passport's key alone".into(),
+                ));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// All signers in the descriptor, flagged for Passport ownership.
 pub fn signers(
     desc: &Descriptor<DescriptorPublicKey>,
